@@ -1351,37 +1351,31 @@
             container.innerHTML = filteredList.map(s => {
                 let cardBg = "bg-amber-50/70 border-amber-200";
 let badgeHtml = `<button onclick="toggleDriverBoard(${s.id})" class="whitespace-nowrap shrink-0 bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-[10px] px-2.5 py-1.5 rounded-lg shadow active:scale-95 transition">🟡 กดรับขึ้นรถ</button>`;
-let statusBadgeText = `<span class="whitespace-nowrap shrink-0 text-[9px] bg-amber-200 text-amber-900 font-bold px-1.5 py-0.5 rounded">🟡 ยังไม่ขึ้น</span>`;
+let statusBadgeText = `<span class="inline-flex items-center whitespace-nowrap shrink-0 text-[9px] bg-amber-200 text-amber-900 font-bold px-1.5 py-0.5 rounded">🟡 ยังไม่ขึ้น</span>`;
 
 if (!s.isMorningGo) {
     cardBg = "bg-rose-50/70 border-rose-200";
-    badgeHtml = `<span class="whitespace-nowrap shrink-0 text-rose-600 font-bold text-[10px] bg-rose-100 px-2 py-1 rounded-lg border border-rose-200">🔴 ลา</span>`;
-    statusBadgeText = `<span class="whitespace-nowrap shrink-0 text-[9px] bg-rose-200 text-rose-900 font-bold px-1.5 py-0.5 rounded">🔴 ลา</span>`;
+    badgeHtml = `<span class="inline-flex items-center whitespace-nowrap shrink-0 text-rose-600 font-bold text-[10px] bg-rose-100 px-2 py-1 rounded-lg border border-rose-200">🔴 ลา</span>`;
+    statusBadgeText = `<span class="inline-flex items-center whitespace-nowrap shrink-0 text-[9px] bg-rose-200 text-rose-900 font-bold px-1.5 py-0.5 rounded">🔴 ลา</span>`;
 } else if (s.boarded) {
     cardBg = "bg-emerald-50/80 border-emerald-200";
     badgeHtml = `<button onclick="toggleDriverBoard(${s.id})" class="whitespace-nowrap shrink-0 text-emerald-700 font-bold text-[10px] bg-emerald-100 px-2 py-1 rounded-lg border border-emerald-300 hover:bg-emerald-200 active:scale-95 transition">✅ ขึ้นรถแล้ว (กดยกเลิก)</button>`;
-    statusBadgeText = `<span class="whitespace-nowrap shrink-0 text-[9px] bg-emerald-200 text-emerald-900 font-bold px-1.5 py-0.5 rounded">🟢 ขึ้นแล้ว</span>`;
+    statusBadgeText = `<span class="inline-flex items-center whitespace-nowrap shrink-0 text-[9px] bg-emerald-200 text-emerald-900 font-bold px-1.5 py-0.5 rounded">🟢 ขึ้นแล้ว</span>`;
 }
 
                 return `
-    <div class="flex items-center justify-between gap-3 p-3 ${cardBg} rounded-xl border">
-        <!-- Left Side Info Container -->
-        <div class="min-w-0 flex-1">
-            <!-- Name + Status Badge Line -->
-            <div class="flex items-center gap-2 min-w-0">
-                <span class="font-bold text-xs text-slate-800 truncate min-w-0 flex-1">${s.name}</span>
-                ${statusBadgeText}
-            </div>
-            <!-- School Name -->
-            <p class="text-[10px] text-slate-500 truncate mt-0.5">${s.school}</p>
-            <!-- Note -->
-            <p class="text-[10px] text-slate-400 truncate">หมายเหตุ: ${s.note || 'ขึ้นรถปกติ'}</p>
-        </div>
-
-        <!-- Action Button / Badge -->
-        ${badgeHtml}
-    </div>
-`;
+                    <div class="p-3 rounded-2xl border flex justify-between items-center shadow-sm ${cardBg} transition-all">
+                        <div>
+                            <div class="flex items-center gap-1.5">
+                                <p class="font-bold text-slate-900 text-xs">${s.name} (${s.nickname})</p>
+                                ${statusBadgeText}
+                            </div>
+                            <p class="text-[10px] text-slate-600 font-medium mt-0.5">${s.school}</p>
+                            <p class="text-[9px] text-slate-500">หมายเหตุ: ${s.statusNote}</p>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            ${badgeHtml}
+                        </div>
                     </div>
                 `;
             }).join('');
