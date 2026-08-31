@@ -998,18 +998,24 @@
             </div>
             
             <div class="p-3.5 bg-purple-50 border border-purple-200 rounded-2xl space-y-2.5 text-xs">
-                <p class="font-bold text-purple-950 flex items-center gap-1.5 border-b border-purple-200 pb-1.5">
-                    <i class="fa-solid fa-building-columns text-purple-700"></i> ข้อมูลบัญชีรับเงินของคนขับ
-                </p>
-                <div>
-                    <label class="font-bold text-slate-700 block mb-1">ชื่อบัญชีธนาคาร / พร้อมเพย์:</label>
-                    <input type="text" id="input-driver-account-name" value="นายศักดิ์ชัย มีสุข" class="w-full p-2.5 rounded-xl border border-purple-300 font-bold text-purple-900 focus:outline-none focus:border-purple-600 bg-white">
-                </div>
-                <div>
-                    <label class="font-bold text-slate-700 block mb-1">เบอร์พร้อมเพย์ (10 หลัก):</label>
-                    <input type="text" id="input-driver-promptpay" value="0812345678" class="w-full p-2.5 rounded-xl border border-purple-300 font-bold text-purple-900 focus:outline-none focus:border-purple-600 bg-white text-xs">
-                </div>
-            </div>
+    <p class="font-bold text-purple-950 flex items-center gap-1.5 border-b border-purple-200 pb-1.5">
+        <i class="fa-solid fa-building-columns text-purple-700"></i> ข้อมูลบัญชีรับเงินของคนขับ
+    </p>
+    <div>
+        <label class="font-bold text-slate-700 block mb-1">ชื่อบัญชีธนาคาร / พร้อมเพย์:</label>
+        <input type="text" id="input-driver-account-name" value="นายศักดิ์ชัย มีสุข" class="w-full p-2.5 rounded-xl border border-purple-300 font-bold text-purple-900 focus:outline-none focus:border-purple-600 bg-white">
+    </div>
+    <div>
+        <label class="font-bold text-slate-700 block mb-1">เลขบัญชีธนาคาร:</label>
+        <input type="text" id="input-driver-bank-number" value="123-4-56789-0" class="w-full p-2.5 rounded-xl border border-purple-300 font-bold text-purple-900 focus:outline-none focus:border-purple-600 bg-white text-xs" placeholder="เช่น 123-4-56789-0">
+    </div>
+    <div>
+        <label class="font-bold text-slate-700 block mb-1">เบอร์พร้อมเพย์ (10 หลัก):</label>
+        <input type="text" id="input-driver-promptpay" value="0812345678" class="w-full p-2.5 rounded-xl border border-purple-300 font-bold text-purple-900 focus:outline-none focus:border-purple-600 bg-white text-xs">
+    </div>
+</div>
+
+            
 
             <div class="space-y-3 text-xs">
                 <p class="font-bold text-slate-800 text-xs flex items-center gap-1.5">
@@ -1364,21 +1370,31 @@ if (!s.isMorningGo) {
 }
 
                 return `
-                    <div class="p-3 rounded-2xl border flex justify-between items-center shadow-sm ${cardBg} transition-all">
-                        <div>
-                            <div class="flex items-center gap-1.5">
-                                <p class="font-bold text-slate-900 text-xs">${s.name} (${s.nickname})</p>
-                                ${statusBadgeText}
-                            </div>
-                            <p class="text-[10px] text-slate-600 font-medium mt-0.5">${s.school}</p>
-                            <p class="text-[9px] text-slate-500">หมายเหตุ: ${s.statusNote}</p>
-                        </div>
-                        <div class="flex items-center gap-1.5">
-                            ${badgeHtml}
-                        </div>
+                    <div class="p-3.5 ${cardBg} rounded-xl border flex flex-col gap-2">
+            <div class="flex items-center justify-between gap-2">
+                <!-- Left Info Section -->
+                <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5 min-w-0">
+                        <span class="font-bold text-xs text-slate-800 truncate min-w-0">${s.name}</span>
+                        ${statusBadgeText}
                     </div>
-                `;
-            }).join('');
+                    <p class="text-[10px] text-slate-500 truncate mt-0.5">${s.school}</p>
+                    <p class="text-[10px] text-slate-400 truncate">หมายเหตุ: ${s.note || 'ขึ้นรถปกติ'}</p>
+                </div>
+
+                <!-- Right Action Button -->
+                ${badgeHtml}
+            </div>
+
+            <!-- Address Button Row -->
+            <div class="pt-2 border-t border-slate-200/60 flex items-center justify-between text-[10px]">
+                <button onclick="alert('📍 ที่อยู่นักเรียน (${s.name}):\\n${s.address}')" class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800 font-semibold bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100 transition active:scale-95">
+                    📍 ดูที่อยู่นักเรียน
+                </button>
+            </div>
+        </div>
+    `;
+}).join('');
         }
 
         function filterDriverStudents(filter) {
