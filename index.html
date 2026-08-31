@@ -1,0 +1,2313 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>School Van Track Pro - ระบบติดตามรถตู้โรงเรียนครบวงจร</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome 6 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet.js (Interactive Real Map) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- QRCode.js Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700;800&display=swap');
+        * {
+            -webkit-tap-highlight-color: transparent;
+            font-family: 'Prompt', sans-serif;
+        }
+        body { 
+            background: radial-gradient(circle at top, #1e293b, #0f172a); 
+        }
+        
+        .expand-panel {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease-in-out;
+            opacity: 0;
+        }
+        .expand-panel.open {
+            max-height: 1100px;
+            opacity: 1;
+        }
+
+        .sheet-container {
+            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), max-height 0.35s ease;
+        }
+        .sheet-minimized {
+            max-height: 90px !important;
+            overflow: hidden !important;
+        }
+
+        .custom-scroll::-webkit-scrollbar {
+            width: 5px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 9999px;
+        }
+        
+        /* Map custom markers */
+        .leaflet-div-icon {
+            background: transparent;
+            border: none;
+        }
+        .van-marker-pulse {
+            animation: vanPulse 1.8s infinite ease-in-out;
+        }
+        @keyframes vanPulse {
+            0% { transform: scale(0.95); filter: drop-shadow(0 0 0 rgba(245, 158, 11, 0.7)); }
+            70% { transform: scale(1.08); filter: drop-shadow(0 0 12px rgba(245, 158, 11, 0)); }
+            100% { transform: scale(0.95); filter: drop-shadow(0 0 0 rgba(245, 158, 11, 0)); }
+        }
+
+        /* Toast animation */
+        #toast-box {
+            transition: transform 0.3s ease, opacity 0.3s ease;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-start p-1 sm:p-4 text-slate-800">
+
+    <!-- GLOBAL TOAST NOTIFICATION -->
+    <div id="toast-box" class="fixed top-4 z-[999] max-w-sm w-[90%] pointer-events-none opacity-0 -translate-y-5 flex items-center gap-3 p-3.5 rounded-2xl shadow-2xl bg-slate-900/95 text-white border border-slate-700 backdrop-blur-md">
+        <div id="toast-icon" class="w-8 h-8 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center text-sm font-bold flex-shrink-0">
+            <i class="fa-solid fa-bell"></i>
+        </div>
+        <div class="flex-1 min-w-0">
+            <h4 id="toast-title" class="text-xs font-bold text-white truncate">แจ้งเตือนระบบ</h4>
+            <p id="toast-msg" class="text-[11px] text-slate-300 line-clamp-2">ข้อความแจ้งเตือน</p>
+        </div>
+    </div>
+
+    <!-- MAIN APP CONTAINER -->
+    <div class="w-full max-w-md bg-slate-100 min-h-[920px] h-[100dvh] max-h-[960px] rounded-[2.5rem] shadow-2xl flex flex-col justify-between overflow-hidden relative border border-slate-700/60 my-auto">
+
+        <!-- TOP ROLE SWITCHER & SIMULATION TABS -->
+        <div class="bg-slate-900/95 text-slate-300 px-3.5 py-2.5 flex flex-col gap-1.5 border-b border-slate-800 z-30 shadow-md">
+            <div class="flex justify-between items-center text-xs">
+                <span class="font-black text-amber-400 flex items-center gap-1.5 tracking-wide text-xs">
+                    <i class="fa-solid fa-van-shuttle text-amber-400"></i> Van Track <span class="bg-amber-400 text-slate-950 text-[9px] px-1.5 py-0.5 rounded-md font-extrabold uppercase">PRO</span>
+                </span>
+                <div class="flex gap-1 bg-slate-800/80 p-0.5 rounded-xl border border-slate-700/80">
+                    <button onclick="switchRoleView('driver')" id="tab-view-driver" class="px-2.5 py-1 rounded-lg font-bold bg-amber-400 text-slate-950 shadow transition-all duration-200 text-[11px]">🚌 คนขับ</button>
+                    <button onclick="switchRoleView('student')" id="tab-view-student" class="px-2.5 py-1 rounded-lg font-bold hover:bg-slate-700/50 text-slate-300 transition-all duration-200 text-[11px]">🎓 นักเรียน</button>
+                    <button onclick="switchRoleView('parent')" id="tab-view-parent" class="px-2.5 py-1 rounded-lg font-bold hover:bg-slate-700/50 text-slate-300 transition-all duration-200 text-[11px]">👨‍👩‍👦 ผู้ปกครอง</button>
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-2 gap-1.5">
+                <button onclick="simulateNextDayRollover()" class="py-1 px-2 bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-600 hover:to-indigo-700 text-white font-bold text-[10px] rounded-xl shadow transition flex items-center justify-center gap-1.5 active:scale-95">
+                    <i class="fa-solid fa-arrows-rotate text-[10px]"></i>
+                    <span>🌅 ข้ามสู่วันถัดไป (Reset)</span>
+                </button>
+                <button onclick="simulateNoonReset()" class="py-1 px-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-bold text-[10px] rounded-xl shadow transition flex items-center justify-center gap-1.5 active:scale-95">
+                    <i class="fa-solid fa-clock text-[10px]"></i>
+                    <span>☀️ รีเซ็ตเที่ยง (รอบเย็น)</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ================= PAGE 1: DRIVER DASHBOARD MAIN ================= -->
+        <div id="screen-dashboard" class="flex flex-col h-full flex-1 relative overflow-hidden">
+            
+            <!-- Real Interactive Leaflet Map for Driver -->
+            <div id="map-container-driver" class="relative w-full flex-1 min-h-[250px] overflow-hidden transition-all duration-300 z-0">
+                <div id="leaflet-map-driver" class="w-full h-full z-0"></div>
+
+                <!-- Driver Header Card Overlay -->
+                <div class="absolute top-3 inset-x-3 bg-slate-900/90 backdrop-blur-md text-white p-3 rounded-2xl shadow-xl border border-slate-700/80 flex justify-between items-center z-[500]">
+                    <div class="flex items-center gap-2.5">
+                        <button onclick="openProfileEditModal('driver')" class="w-8 h-8 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center border border-slate-700 hover:bg-slate-700 shadow active:scale-95 transition" title="แก้ไขข้อมูลส่วนตัว">
+                            <i class="fa-solid fa-gear text-xs"></i>
+                        </button>
+
+                        <div id="avatar-container-driver" class="w-9 h-9 rounded-xl bg-amber-500 text-slate-950 font-extrabold flex items-center justify-center overflow-hidden border border-amber-400 shadow cursor-pointer" onclick="openProfileEditModal('driver')">
+                            <span id="avatar-text-driver" class="text-sm">ศ</span>
+                            <img id="avatar-img-driver" class="w-full h-full object-cover hidden" alt="โปรไฟล์คนขับ">
+                        </div>
+
+                        <div>
+                            <p class="text-xs font-bold text-amber-400" id="driver-disp-name">นายศักดิ์ชัย มีสุข (ลุงศักดิ์)</p>
+                            <div class="flex items-center gap-1.5 mt-0.5">
+                                <p class="text-[10px] text-slate-300" id="driver-disp-sub">รหัสรถ: V-98765 • 3กข-1234 กทม.</p>
+                                <button onclick="viewVanPhotoModal()" class="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-400/40 px-1.5 py-0.5 rounded hover:bg-amber-500/40 flex items-center gap-1">
+                                    <i class="fa-solid fa-bus text-[8px]"></i>
+                                    <span>รูปรถ</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <span id="map-status-dot" class="w-3 h-3 rounded-full bg-slate-400 shadow-sm"></span>
+                        <span id="map-status-text" class="text-[10px] font-bold text-slate-300">จอด</span>
+                    </div>
+                </div>
+
+                <!-- GPS Recenter / Expand Control -->
+                <div class="absolute bottom-4 right-3 flex flex-col gap-2 z-[500]">
+                    <button onclick="recenterMap()" class="w-8 h-8 bg-slate-900/90 text-amber-400 rounded-xl shadow-lg border border-slate-700 flex items-center justify-center hover:bg-slate-800 active:scale-95" title="ตำแหน่งรถตู้">
+                        <i class="fa-solid fa-crosshairs text-xs"></i>
+                    </button>
+                    <button onclick="toggleBottomSheet('driver')" id="map-expand-btn-driver" class="bg-slate-900/90 hover:bg-slate-900 text-amber-400 px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg border border-slate-700 flex items-center gap-1.5">
+                        <i class="fa-solid fa-up-right-and-down-left-from-center text-[10px]" id="expand-icon-driver"></i>
+                        <span id="expand-text-driver">ขยายแผนที่</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- DRIVER BOTTOM SHEET CONTROLS -->
+            <div id="bottom-sheet-driver" class="sheet-container bg-white rounded-t-[2.5rem] -mt-5 p-4 space-y-3 shadow-2xl z-20 border-t border-slate-200 overflow-y-auto custom-scroll max-h-[580px]">
+                
+                <div onclick="toggleBottomSheet('driver')" class="cursor-pointer group pb-1">
+                    <div class="w-12 h-1.5 bg-slate-300 group-hover:bg-indigo-500 rounded-full mx-auto transition"></div>
+                    <p class="text-[9px] text-center text-slate-400 mt-1 font-semibold group-hover:text-indigo-600" id="sheet-handle-text-driver">
+                        <i class="fa-solid fa-chevron-down mr-0.5"></i> กดเพื่อพับแถบลง / ขยายดูแผนที่เต็มจอ
+                    </p>
+                </div>
+
+                <!-- BIG START DRIVING BUTTON -->
+                <div class="text-center">
+                    <button onclick="toggleDriveState()" id="main-drive-btn" class="w-full py-3.5 px-6 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm shadow-xl transition-all flex items-center justify-center gap-2 border border-slate-700 active:scale-[0.99]">
+                        <i class="fa-solid fa-play text-amber-400" id="main-drive-icon"></i>
+                        <span id="main-drive-text">กดเพื่อเริ่มวิ่งรถ (Start Trip)</span>
+                    </button>
+                </div>
+
+                <!-- 4 EQUAL BUTTON CARDS GRID -->
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="togglePanel('panel-students')" id="btn-box-students" class="p-2.5 rounded-2xl bg-slate-100 border border-slate-200 text-left transition flex flex-col justify-between opacity-60 cursor-not-allowed h-[72px]" disabled>
+                        <div class="flex justify-between items-center w-full">
+                            <span class="text-[11px] font-bold text-slate-700">นักเรียนวันนี้</span>
+                            <i class="fa-solid fa-users text-blue-500 text-xs"></i>
+                        </div>
+                        <p class="text-[10px] font-semibold text-slate-500 mt-1" id="student-summary-text">รอเริ่มวิ่ง...</p>
+                    </button>
+
+                    <button onclick="togglePanel('panel-school')" id="btn-box-school" class="p-2.5 rounded-2xl bg-slate-100 border border-slate-200 text-left transition flex flex-col justify-between opacity-60 cursor-not-allowed h-[72px]" disabled>
+                        <div class="flex justify-between items-center w-full">
+                            <span class="text-[11px] font-bold text-slate-700">โรงเรียนปลายทาง</span>
+                            <i class="fa-solid fa-school text-emerald-500 text-xs"></i>
+                        </div>
+                        <p class="text-[10px] font-semibold text-slate-500 mt-1" id="school-summary-text">รอเริ่มวิ่ง...</p>
+                    </button>
+
+                    <button onclick="togglePanel('panel-notice')" id="btn-box-notice" class="p-2.5 rounded-2xl bg-slate-100 border border-slate-200 text-left transition flex flex-col justify-between opacity-60 cursor-not-allowed relative h-[72px]" disabled>
+                        <div class="flex justify-between items-center w-full">
+                            <span class="text-[11px] font-bold text-slate-700">หมายเหตุพิเศษ</span>
+                            <i class="fa-solid fa-bell text-amber-500 text-xs"></i>
+                        </div>
+                        <p class="text-[10px] font-semibold text-slate-500 mt-1" id="notice-summary-text">รอเริ่มวิ่ง...</p>
+                        <span id="notice-ping-dot" class="hidden absolute -top-1 -right-1 w-3 h-3 bg-rose-500 rounded-full border-2 border-white"></span>
+                    </button>
+
+                    <button onclick="togglePanel('panel-payment-schedule')" id="btn-box-payment" class="p-2.5 rounded-2xl bg-purple-50 border border-purple-200 text-left transition flex flex-col justify-between hover:bg-purple-100 cursor-pointer relative h-[72px] shadow-sm">
+                        <div class="flex justify-between items-center w-full">
+                            <span class="text-[11px] font-bold text-purple-900">การชำระเงิน</span>
+                            <i class="fa-solid fa-wallet text-purple-600 text-xs"></i>
+                        </div>
+                        <p class="text-[10px] font-semibold text-purple-700 mt-1" id="payment-summary-text">ครบกำหนด 1 คน</p>
+                        <span class="absolute -top-1 -right-1 w-2.5 h-2.5 bg-amber-500 rounded-full border-2 border-white animate-ping"></span>
+                    </button>
+                </div>
+
+                <button onclick="openVanQRModal()" class="w-full py-2.5 px-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-2xl text-xs font-bold shadow-md flex items-center justify-center gap-2 transition active:scale-98">
+                    <i class="fa-solid fa-qrcode text-amber-300"></i>
+                    <span>รับคนขึ้นรถเพิ่ม (QR Code ประจำรถ & รหัส V-98765)</span>
+                </button>
+
+                <!-- DROPDOWN PANEL 1: STUDENTS LIST -->
+                <div id="panel-students" class="expand-panel bg-blue-50/90 border border-blue-200 rounded-2xl p-3.5 space-y-3">
+                    <div class="bg-white p-3 rounded-xl border border-blue-100 space-y-1 shadow-sm">
+                        <div class="flex justify-between items-center">
+                            <div>
+                                <p class="text-xs font-bold text-blue-950">🚌 รายชื่อนักเรียนประจำวันนี้</p>
+                                <p class="text-[10px] text-slate-600" id="driver-trip-summary-text">กำลังโหลด...</p>
+                            </div>
+                            <span class="px-2 py-1 bg-emerald-100 text-emerald-800 text-[10px] font-bold rounded-lg border border-emerald-300" id="active-school-badge">2 โรงเรียน</span>
+                        </div>
+                    </div>
+
+                    <!-- 4 FILTER BUTTONS FOR STUDENT STATUS -->
+                    <div class="grid grid-cols-4 gap-1 bg-blue-100/70 p-1 rounded-xl text-[9px] font-bold">
+                        <button onclick="filterDriverStudents('all')" id="driver-filter-all" class="py-1.5 rounded-lg bg-indigo-600 text-white shadow transition">
+                            📋 ทั้งหมด
+                        </button>
+                        <button onclick="filterDriverStudents('boarded')" id="driver-filter-boarded" class="py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition">
+                            🟢 ขึ้นแล้ว
+                        </button>
+                        <button onclick="filterDriverStudents('pending')" id="driver-filter-pending" class="py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition">
+                            🟡 ยังไม่ขึ้น
+                        </button>
+                        <button onclick="filterDriverStudents('absent')" id="driver-filter-absent" class="py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition">
+                            🔴 วันนี้ลา
+                        </button>
+                    </div>
+
+                    <div id="driver-student-dynamic-list" class="space-y-2 text-xs"></div>
+                </div>
+
+                <!-- DROPDOWN PANEL 2: SCHOOL LIST -->
+                <div id="panel-school" class="expand-panel bg-emerald-50/90 border border-emerald-200 rounded-2xl p-3.5 space-y-3">
+                    <div class="flex justify-between items-center border-b border-emerald-200 pb-2">
+                        <div>
+                            <p class="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                                <i class="fa-solid fa-school-flag text-xs text-emerald-700"></i> โรงเรียนปลายทางวันนี้ (<span id="active-school-count-label">2</span>)
+                            </p>
+                            <p class="text-[10px] text-slate-500">เรียงตามลำดับเส้นทางแวะส่งจริง</p>
+                        </div>
+                        <button onclick="openSchoolRouteSettingsModal()" class="bg-emerald-700 hover:bg-emerald-800 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-xl shadow transition flex items-center gap-1">
+                            <i class="fa-solid fa-route text-xs"></i>
+                            <span>⚙️ ตั้งลำดับ</span>
+                        </button>
+                    </div>
+                    <div class="space-y-1.5 text-xs text-slate-700" id="school-list-container"></div>
+                </div>
+
+                <!-- DROPDOWN PANEL 3: NOTICES -->
+                <div id="panel-notice" class="expand-panel bg-amber-50/90 border border-amber-200 rounded-2xl p-3.5 space-y-3">
+                    <div class="flex justify-between items-center border-b border-amber-200 pb-2">
+                        <p class="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                            <i class="fa-solid fa-bell text-xs text-amber-600"></i> หมายเหตุคำขอพิเศษจากนักเรียน/ผู้ปกครอง
+                        </p>
+                        <span id="notice-status-tag" class="text-[9px] bg-amber-200 text-amber-900 font-bold px-2 py-0.5 rounded-md">รออนุมัติ</span>
+                    </div>
+                    
+                    <div id="driver-notice-card-container" class="p-3 bg-white rounded-xl border border-amber-200 space-y-2.5 shadow-sm">
+                        <div class="flex justify-between items-start">
+                            <div>
+                                <p class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                                    <i class="fa-solid fa-user-graduate text-indigo-600"></i>
+                                    <span id="notice-student-fullname">ด.ช. สมชาย ใจดี (น้องชาย)</span>
+                                </p>
+                                <p class="text-xs text-amber-900 font-bold mt-1 bg-amber-50 p-2.5 rounded-xl border border-amber-200" id="driver-notice-text-content">📍 หมายเหตุ: ขอไปรอรถตู้สาย 10 นาที</p>
+                            </div>
+                            <span class="text-[9px] text-slate-400">07:20 น.</span>
+                        </div>
+
+                        <!-- APPROVAL ACTION BUTTONS -->
+                        <div class="space-y-2 pt-2 border-t border-slate-100" id="driver-notice-action-box">
+                            <div class="flex flex-col gap-2">
+                                <button onclick="approveNoticeByDriver()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl shadow-md transition flex items-center justify-center gap-2 active:scale-98">
+                                    <i class="fa-solid fa-circle-check text-sm"></i>
+                                    <span>✅ อนุมัติคำขอนี้ทันที</span>
+                                </button>
+                                <button onclick="disapproveNoticeByDriver()" class="w-full py-2 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-[11px] rounded-xl border border-slate-200 transition flex items-center justify-center gap-1.5">
+                                    <i class="fa-solid fa-ban text-xs"></i>
+                                    <span>❌ ไม่อนุมัติ</span>
+                                </button>
+                            </div>
+                            <div class="flex justify-between items-center pt-1">
+                                <button onclick="openChatScreen('ด.ช. สมชาย ใจดี (น้องชาย)', 'นักเรียน')" class="text-[10px] text-indigo-600 font-bold hover:underline">
+                                    💬 คุยรายละเอียดในแชต
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DROPDOWN PANEL 4: PAYMENT SCHEDULE -->
+                <div id="panel-payment-schedule" class="expand-panel bg-purple-50/90 border border-purple-200 rounded-2xl p-3.5 space-y-2.5">
+                    <div class="flex justify-between items-center border-b border-purple-200/80 pb-2">
+                        <div>
+                            <p class="text-xs font-bold text-purple-950 flex items-center gap-1.5">
+                                <i class="fa-solid fa-wallet text-purple-600 text-xs"></i> กำหนดชำระค่ารถแยกรายบุคคล
+                            </p>
+                            <p class="text-[10px] text-purple-700 mt-0.5">ระบบ QR พร้อมเพย์ และบันทึกยอดเงิน</p>
+                        </div>
+                        <button onclick="openFareSettingsModal()" class="bg-purple-700 hover:bg-purple-800 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-xl shadow transition flex items-center gap-1">
+                            <i class="fa-solid fa-sliders text-xs"></i>
+                            <span>⚙️ ตั้งค่าราคา & บัญชี</span>
+                        </button>
+                    </div>
+
+                    <div id="payment-alert-card" class="bg-amber-100/90 border border-amber-300 p-2.5 rounded-xl flex items-start gap-2 shadow-sm">
+                        <i class="fa-solid fa-clock-rotate-left text-amber-600 mt-0.5 text-xs"></i>
+                        <div class="space-y-1 text-[11px] flex-1">
+                            <p class="font-bold text-amber-900">🔔 ครบรอบกำหนดจ่ายค่ารถวันนี้! (ด.ช. สมชาย)</p>
+                            <p class="text-slate-700 text-[10px]">วันเริ่มขึ้นรถ: 2 ก.ย. 2026 • ระบบเตรียมบิลพร้อมส่งแล้ว</p>
+                            <button onclick="sendPaymentNoticeToParent('คุณแม่นิด', 'ด.ช. สมชาย')" class="w-full py-2 bg-gradient-to-r from-amber-600 to-indigo-600 hover:from-amber-700 hover:to-indigo-700 text-white font-bold text-[10px] rounded-lg shadow flex items-center justify-center gap-1.5 active:scale-95">
+                                <i class="fa-solid fa-paper-plane"></i>
+                                <span>📤 ส่งแจ้งเตือนไปยังแอปผู้ปกครอง</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-2 text-xs pt-1">
+                        <!-- Student 1 Payment Item -->
+                        <div class="p-2.5 bg-white rounded-xl border border-purple-100 shadow-sm space-y-1.5" id="driver-pay-item-somchai">
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-slate-800">1. ด.ช. สมชาย ใจดี (น้องชาย)</span>
+                                <span id="driver-pay-badge-somchai" class="text-amber-700 font-bold text-[10px] bg-amber-50 px-2 py-0.5 rounded-md border border-amber-200">
+                                    ⏳ รอการชำระ
+                                </span>
+                            </div>
+                            <p class="text-[10px] text-slate-500">วันเริ่มขึ้นรถ: 2 ก.ย. • ยอด: <strong class="text-purple-700" id="fare-text-somchai">฿2,500 / เดือน</strong></p>
+                            
+                            <div class="flex justify-between items-center text-[10px] pt-1 text-slate-600 border-t border-slate-100">
+                                <span id="driver-pay-method-note-somchai" class="font-semibold text-slate-500">ช่องทาง: รอเลือก</span>
+                                <div class="flex gap-1" id="driver-pay-action-buttons-somchai">
+                                    <button onclick="openSlipModal('ด.ช. สมชาย ใจดี', 2500)" class="text-indigo-600 font-bold hover:underline">📄 ดูสลิป/หลักฐาน</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Student 2 Payment Item -->
+                        <div class="p-2.5 bg-white rounded-xl border border-purple-100 shadow-sm space-y-1.5">
+                            <div class="flex justify-between items-center">
+                                <span class="font-bold text-slate-800">2. ด.ญ. กานดา รักเรียน (น้องกานดา)</span>
+                                <span class="text-emerald-700 font-bold text-[10px] bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">✅ ชำระแล้ว</span>
+                            </div>
+                            <p class="text-[10px] text-slate-500">วันเริ่มขึ้นรถ: 16 ก.ย. • ยอด: <strong class="text-purple-700" id="fare-text-kanda">฿3,500 / เดือน</strong></p>
+                            <div class="flex justify-between items-center text-[10px] pt-1 text-slate-600 border-t border-slate-100">
+                                <span>กำหนดชำระถัดไป: 16 ต.ค. 2026</span>
+                                <button onclick="openSlipModal('ด.ญ. กานดา รักเรียน', 3500)" class="text-indigo-600 font-bold hover:underline">
+                                    📄 สลิปโอนเงิน
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- QUICK CHAT SHORTCUTS -->
+                <div class="p-3 bg-indigo-50 border border-indigo-200 rounded-2xl space-y-2">
+                    <p class="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                        <i class="fa-solid fa-comments text-indigo-600 text-xs"></i> กล่องข้อความและการติดต่อสื่อสารด่วน
+                    </p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="openChatSelectionModal('student')" class="py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1.5 active:scale-95">
+                            <i class="fa-solid fa-user-graduate"></i>
+                            <span>💬 คุยกับนักเรียน</span>
+                        </button>
+                        <button onclick="openChatSelectionModal('parent')" class="py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1.5 active:scale-95">
+                            <i class="fa-solid fa-user-group"></i>
+                            <span>👨‍👩‍👦 คุยกับผู้ปกครอง</span>
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- ================= PAGE 2: INDIVIDUAL CHAT SCREEN ================= -->
+        <div id="screen-chat" class="flex flex-col h-full flex-1 hidden bg-slate-50 relative z-30">
+            <div class="bg-slate-900 text-white p-3.5 flex justify-between items-center shadow-lg">
+                <div class="flex items-center gap-2.5">
+                    <button onclick="closeChatScreen()" class="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 flex items-center justify-center text-amber-400">
+                        <i class="fa-solid fa-arrow-left text-sm"></i>
+                    </button>
+                    <div>
+                        <h3 class="font-bold text-xs text-white" id="chat-target-name">ด.ญ. กานดา รักเรียน (น้องกานดา)</h3>
+                        <p class="text-[10px] text-amber-300" id="chat-target-subtext">นักเรียน</p>
+                    </div>
+                </div>
+                <button onclick="makeDirectCall()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-xl text-xs font-bold shadow flex items-center gap-1.5 transition active:scale-95">
+                    <i class="fa-solid fa-phone"></i> โทรออก
+                </button>
+            </div>
+
+            <div class="flex-1 p-3.5 space-y-3 overflow-y-auto custom-scroll" id="chat-messages-box">
+                <div class="text-center">
+                    <span class="text-[9px] bg-slate-200 text-slate-600 px-2.5 py-0.5 rounded-full">วันนี้ 07:20 น.</span>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 p-3 rounded-2xl space-y-2 shadow-sm">
+                    <div class="flex items-center gap-2 text-amber-800 text-xs font-bold">
+                        <i class="fa-solid fa-triangle-exclamation text-amber-600"></i>
+                        <span>แจ้งหมายเหตุขออนุมัติ</span>
+                    </div>
+                    <p class="text-xs text-slate-700">"หนูขอไปรอรถตู้สาย 10 นาทีนะคะ พอดีแต่งตัวยังไม่เสร็จค่ะ"</p>
+                </div>
+            </div>
+
+            <div class="p-3 bg-white border-t border-slate-200 flex gap-2 items-center">
+                <button onclick="simulateAttachFile()" class="w-9 h-9 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center hover:bg-slate-200 active:scale-95">
+                    <i class="fa-solid fa-paperclip text-sm"></i>
+                </button>
+                <input type="text" id="chat-input-field" onkeypress="if(event.key==='Enter') sendChatMessage()" placeholder="พิมพ์ข้อความโต้ตอบ..." class="flex-1 p-2.5 bg-slate-100 border border-slate-200 rounded-xl text-xs focus:outline-none focus:border-indigo-500 font-medium">
+                <button onclick="sendChatMessage()" class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center hover:bg-indigo-700 shadow active:scale-95">
+                    <i class="fa-solid fa-paper-plane text-xs"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- ================= PAGE 3: STUDENT DASHBOARD ================= -->
+        <div id="screen-student-view" class="flex flex-col h-full flex-1 hidden bg-slate-100 relative overflow-hidden">
+            
+            <div id="map-container-student" class="relative w-full flex-1 min-h-[250px] overflow-hidden transition-all duration-300 z-0">
+                <div id="leaflet-map-student" class="w-full h-full z-0"></div>
+
+                <div class="absolute top-3 inset-x-3 bg-slate-900/90 backdrop-blur-md text-white p-3 rounded-2xl shadow-xl border border-slate-700/80 flex justify-between items-center z-[500]">
+                    <div class="flex items-center gap-2">
+                        <button onclick="openProfileEditModal('student')" class="w-8 h-8 rounded-xl bg-slate-800 text-amber-400 flex items-center justify-center border border-slate-700 hover:bg-slate-700 shadow active:scale-95 transition" title="แก้ไขข้อมูลส่วนตัว">
+                            <i class="fa-solid fa-gear text-xs"></i>
+                        </button>
+
+                        <div id="avatar-container-student" class="w-9 h-9 rounded-xl bg-blue-600 text-white font-extrabold flex items-center justify-center overflow-hidden border border-blue-400 shadow cursor-pointer" onclick="openProfileEditModal('student')">
+                            <span id="avatar-text-student" class="text-sm">ส</span>
+                            <img id="avatar-img-student" class="w-full h-full object-cover hidden" alt="รูปโปรไฟล์นักเรียน">
+                        </div>
+
+                        <div>
+                            <span class="text-[9px] bg-blue-600 px-2 py-0.5 rounded font-bold text-white uppercase tracking-wider">STUDENT APP</span>
+                            <h2 class="text-xs font-bold text-amber-400 mt-0.5" id="student-disp-name">ด.ช. สมชาย ใจดี (น้องชาย)</h2>
+                            <div class="flex items-center gap-1.5 mt-0.5">
+                                <p class="text-[10px] text-slate-300" id="student-disp-school"><span id="student-disp-school-name">โรงเรียนสาธิตพัฒนา</span> • รถตู้ V-98765</p>
+                                <button onclick="viewVanPhotoModal()" class="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-400/40 px-1.5 py-0.2 rounded hover:bg-amber-500/40 flex items-center gap-1">
+                                    <i class="fa-solid fa-bus text-[8px]"></i>
+                                    <span>รูปรถ</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block mr-1" id="student-van-dot"></span>
+                        <span class="text-[10px] font-bold text-slate-300" id="student-van-text-badge">จอดอยู่</span>
+                    </div>
+                </div>
+
+                <button onclick="toggleBottomSheet('student')" id="map-expand-btn-student" class="absolute bottom-3 right-3 bg-slate-900/90 hover:bg-slate-900 text-amber-400 px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg border border-slate-700 flex items-center gap-1 z-[500]">
+                    <i class="fa-solid fa-up-right-and-down-left-from-center text-[10px]" id="expand-icon-student"></i>
+                    <span id="expand-text-student">ขยายแผนที่</span>
+                </button>
+            </div>
+
+            <div id="bottom-sheet-student" class="sheet-container bg-white rounded-t-[2.5rem] -mt-5 p-4 space-y-3 shadow-2xl z-20 border-t border-slate-200 overflow-y-auto custom-scroll max-h-[580px]">
+                
+                <div onclick="toggleBottomSheet('student')" class="cursor-pointer group pb-1">
+                    <div class="w-12 h-1.5 bg-slate-300 group-hover:bg-indigo-500 rounded-full mx-auto transition"></div>
+                    <p class="text-[9px] text-center text-slate-400 mt-1 font-semibold group-hover:text-indigo-600" id="sheet-handle-text-student">
+                        <i class="fa-solid fa-chevron-down mr-0.5"></i> กดเพื่อพับแถบลง / ขยายดูแผนที่เต็มจอ
+                    </p>
+                </div>
+
+                <div id="student-van-running-banner" class="p-3 bg-slate-800 text-white rounded-2xl flex justify-between items-center shadow-md border border-slate-700">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-8 h-8 rounded-xl bg-slate-700 flex items-center justify-center text-amber-400 text-sm">
+                            <i class="fa-solid fa-van-shuttle"></i>
+                        </div>
+                        <div>
+                            <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">สถานะการวิ่งรถตู้ลุงศักดิ์</p>
+                            <p class="text-xs font-extrabold text-amber-400" id="banner-van-status-text">🛑 รถตู้ยังไม่เริ่มวิ่ง (ประจำจุดจอด)</p>
+                        </div>
+                    </div>
+                    <span class="text-[9px] bg-slate-700 text-slate-300 font-bold px-2 py-1 rounded-lg" id="banner-van-badge">รอเริ่มวิ่ง</span>
+                </div>
+
+                <button onclick="openWeeklyScheduleModal()" class="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs rounded-2xl shadow-md transition flex items-center justify-center gap-2 active:scale-98">
+                    <i class="fa-solid fa-calendar-days text-amber-300"></i>
+                    <span>📅 ตั้งค่าตารางรับ-ส่งประจำสัปดาห์ (จ.-ศ.)</span>
+                </button>
+
+                <div class="bg-blue-50 border border-blue-200 p-3 rounded-2xl flex justify-between items-center shadow-sm">
+                    <div>
+                        <p class="text-[10px] text-blue-700 font-bold uppercase tracking-wider">สถานะของนักเรียนวันนี้</p>
+                        <p class="text-xs font-extrabold text-slate-800 mt-0.5" id="student-self-status-display">✅ ไปโรงเรียนปกติ (รถตู้แวะรับ)</p>
+                    </div>
+                    <span class="text-xs bg-emerald-500 text-white font-bold px-2.5 py-1 rounded-xl shadow" id="student-self-badge">ปกติ</span>
+                </div>
+
+                <!-- STUDENT ACTIVE NOTE CARD -->
+                <div id="student-active-notice-box" class="hidden rounded-2xl p-3.5 space-y-2 shadow-sm transition-all border bg-amber-50 border-amber-200">
+                    <div class="flex justify-between items-center">
+                        <div class="flex items-center gap-1.5 font-bold text-xs text-amber-900" id="student-notice-header-title">
+                            <i class="fa-solid fa-bookmark text-amber-600" id="student-notice-icon"></i>
+                            <span id="student-notice-label">หมายเหตุพิเศษของฉัน:</span>
+                        </div>
+                        <span class="text-[9px] font-bold px-2.5 py-0.5 rounded-full shadow-sm bg-amber-200 text-amber-900" id="student-notice-badge">ฉบับร่าง</span>
+                    </div>
+
+                    <p class="text-xs font-bold pl-4 text-slate-800" id="student-active-notice-text">""</p>
+                    
+                    <div id="student-notice-action-buttons" class="grid grid-cols-2 gap-2 pt-1">
+                        <button onclick="sendDraftNotice()" class="py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1 active:scale-95">
+                            <i class="fa-solid fa-paper-plane"></i>
+                            <span>🚀 กดส่งให้คนขับ</span>
+                        </button>
+                        <button onclick="deleteDraftNotice()" class="py-2 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center gap-1 active:scale-95">
+                            <i class="fa-solid fa-trash-can"></i>
+                            <span>🗑️ ลบฉบับร่าง</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-amber-50/90 p-3.5 rounded-2xl border border-amber-200 space-y-2.5 shadow-sm">
+                    <div class="flex justify-between items-center">
+                        <p class="text-xs font-bold text-amber-950 flex items-center gap-1.5">
+                            <i class="fa-solid fa-clock text-amber-600 text-xs"></i> 1. แจ้งขอเลท / ขอเพิ่มจุดรอรับ
+                        </p>
+                        <span class="text-[9px] bg-amber-200 text-amber-900 font-bold px-2 py-0.5 rounded">ร่าง & ส่ง</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="requestLateTime(5)" class="py-2.5 px-3 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1 active:scale-95">
+                            <i class="fa-solid fa-hourglass-start"></i>
+                            <span>ขอเลท 5 นาที</span>
+                        </button>
+                        <button onclick="requestLateTime(10)" class="py-2.5 px-3 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1 active:scale-95">
+                            <i class="fa-solid fa-hourglass-half"></i>
+                            <span>ขอเลท 10 นาที</span>
+                        </button>
+                    </div>
+
+                    <button onclick="openCustomLocationNoteModal()" class="w-full py-2.5 bg-white hover:bg-amber-100 text-amber-900 font-bold text-xs rounded-xl border border-amber-300 transition flex items-center justify-center gap-1.5 shadow-sm active:scale-95">
+                        <i class="fa-solid fa-plus-circle text-amber-600 text-sm"></i>
+                        <span>+ เพิ่มหมายเหตุพิเศษ (กำหนดเอง)</span>
+                    </button>
+                </div>
+
+                <!-- INDEPENDENT MORNING & EVENING ATTENDANCE SWITCHES -->
+                <div class="bg-indigo-50/90 p-3.5 rounded-2xl border border-indigo-200 space-y-3 shadow-sm">
+                    <div class="flex justify-between items-center border-b border-indigo-200/80 pb-2">
+                        <div>
+                            <p class="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                                <i class="fa-solid fa-calendar-check text-indigo-600 text-xs"></i> 2. แจ้งสถานะรับ-ส่ง (แยกเช้า/เย็น อิสระ)
+                            </p>
+                            <p class="text-[10px] text-indigo-700 mt-0.5">เปลี่ยนสถานะลากิจ ข้อมูลจะรีเซ็ตอัตโนมัติเมื่อขึ้นวันใหม่</p>
+                        </div>
+                    </div>
+
+                    <button onclick="setFullDayLeave()" class="w-full py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1.5 active:scale-95">
+                        <i class="fa-solid fa-umbrella-beach"></i>
+                        <span>🏖️ กดลาทั้งวัน (เช้าไม่ไป & เย็นไม่กลับ)</span>
+                    </button>
+
+                    <div class="bg-white p-3 rounded-xl border border-indigo-100 space-y-2 shadow-sm">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-bold text-slate-800 flex items-center gap-1">
+                                ☀️ รับรอบเช้า (ไปโรงเรียน)
+                            </span>
+                            <span class="text-[9px] bg-indigo-100 text-indigo-800 font-bold px-2 py-0.5 rounded-full">
+                                ⏰ แจ้ง 18:00 - 24:00 น.
+                            </span>
+                        </div>
+                        
+                        <div class="grid grid-cols-2 gap-2 pt-0.5">
+                            <button onclick="setMorningStatus(true)" id="btn-morning-go" class="py-2.5 px-2 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1 active:scale-95">
+                                <i class="fa-solid fa-circle-check"></i>
+                                <span>ไปโรงเรียน (ปกติ)</span>
+                            </button>
+                            <button onclick="setMorningStatus(false)" id="btn-morning-skip" class="py-2.5 px-2 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center gap-1 active:scale-95">
+                                <i class="fa-solid fa-ban"></i>
+                                <span>ไม่ไปโรงเรียน (ลา)</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="bg-white p-3 rounded-xl border border-indigo-100 space-y-2 shadow-sm">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-bold text-slate-800 flex items-center gap-1">
+                                🌆 ส่งรอบเย็น (กลับรถตู้)
+                            </span>
+                            <span class="text-[9px] bg-purple-100 text-purple-800 font-bold px-2 py-0.5 rounded-full">
+                                ⏰ แจ้ง 12:00 - 16:30 น.
+                            </span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 pt-0.5">
+                            <button onclick="setEveningStatus(true)" id="btn-evening-go" class="py-2.5 px-2 bg-blue-600 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1 active:scale-95">
+                                <i class="fa-solid fa-bus"></i>
+                                <span>กลับรถตู้ (ปกติ)</span>
+                            </button>
+                            <button onclick="setEveningStatus(false)" id="btn-evening-skip" class="py-2.5 px-2 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center gap-1 active:scale-95">
+                                <i class="fa-solid fa-user-xmark"></i>
+                                <span>ไม่กลับรถตู้ (เย็นนี้)</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <button onclick="openChatScreen('นายศักดิ์ชัย (คนขับรถตู้)', 'คนขับรถตู้ประจำคัน')" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs shadow transition flex items-center justify-center gap-2 active:scale-95">
+                    <i class="fa-solid fa-comments text-sm"></i>
+                    <span>เปิดกล่องข้อความคุยกับคนขับรถตู้</span>
+                </button>
+            </div>
+        </div>
+
+        <!-- ================= PAGE 4: PARENT DASHBOARD ================= -->
+        <div id="screen-parent-view" class="flex flex-col h-full flex-1 hidden bg-slate-100 relative overflow-hidden">
+            
+            <div id="map-container-parent" class="relative w-full flex-1 min-h-[250px] overflow-hidden transition-all duration-300 z-0">
+                <div id="leaflet-map-parent" class="w-full h-full z-0"></div>
+
+                <div class="absolute top-3 inset-x-3 bg-purple-950/90 backdrop-blur-md text-white p-3 rounded-2xl shadow-xl border border-purple-700/80 flex justify-between items-center z-[500]">
+                    <div class="flex items-center gap-2">
+                        <button onclick="openProfileEditModal('parent')" class="w-8 h-8 rounded-xl bg-purple-900 text-amber-300 flex items-center justify-center border border-purple-700 hover:bg-purple-800 shadow active:scale-95 transition" title="แก้ไขข้อมูลส่วนตัว">
+                            <i class="fa-solid fa-gear text-xs"></i>
+                        </button>
+
+                        <div id="avatar-container-parent" class="w-9 h-9 rounded-xl bg-purple-600 text-white font-extrabold flex items-center justify-center overflow-hidden border border-purple-400 shadow cursor-pointer" onclick="openProfileEditModal('parent')">
+                            <span id="avatar-text-parent" class="text-sm">น</span>
+                            <img id="avatar-img-parent" class="w-full h-full object-cover hidden" alt="รูปโปรไฟล์ผู้ปกครอง">
+                        </div>
+
+                        <div>
+                            <span class="text-[9px] bg-purple-600 px-2 py-0.5 rounded font-bold text-white uppercase tracking-wider">PARENT APP</span>
+                            <h2 class="text-xs font-bold text-amber-300 mt-0.5" id="parent-disp-name">คุณแม่นิด (ผู้ปกครอง)</h2>
+                            <div class="flex items-center gap-1.5 mt-0.5">
+                                <p class="text-[10px] text-purple-200">ติดตาม: <span id="parent-disp-child">ด.ช. สมชาย ใจดี</span> • V-98765</p>
+                                <button onclick="viewVanPhotoModal()" class="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-400/40 px-1.5 py-0.2 rounded hover:bg-amber-500/40 flex items-center gap-1">
+                                    <i class="fa-solid fa-bus text-[8px]"></i>
+                                    <span>รูปรถ</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block mr-1" id="parent-van-dot"></span>
+                        <span class="text-[10px] font-bold text-slate-300" id="parent-van-text-badge">จอดอยู่</span>
+                    </div>
+                </div>
+
+                <button onclick="toggleBottomSheet('parent')" id="map-expand-btn-parent" class="absolute bottom-3 right-3 bg-purple-950/90 hover:bg-purple-950 text-amber-300 px-3 py-1.5 rounded-xl text-xs font-bold shadow-lg border border-purple-700 flex items-center gap-1 z-[500]">
+                    <i class="fa-solid fa-up-right-and-down-left-from-center text-[10px]" id="expand-icon-parent"></i>
+                    <span id="expand-text-parent">ขยายแผนที่</span>
+                </button>
+            </div>
+
+            <div id="bottom-sheet-parent" class="sheet-container bg-white rounded-t-[2.5rem] -mt-5 p-4 space-y-3.5 shadow-2xl z-20 border-t border-slate-200 overflow-y-auto custom-scroll max-h-[580px]">
+                
+                <div onclick="toggleBottomSheet('parent')" class="cursor-pointer group pb-1">
+                    <div class="w-12 h-1.5 bg-slate-300 group-hover:bg-purple-600 rounded-full mx-auto transition"></div>
+                    <p class="text-[9px] text-center text-slate-400 mt-1 font-semibold group-hover:text-purple-600" id="sheet-handle-text-parent">
+                        <i class="fa-solid fa-chevron-down mr-0.5"></i> กดเพื่อพับแถบลง / ขยายดูแผนที่เต็มจอ
+                    </p>
+                </div>
+
+                <!-- STEP-BY-STEP TRIP STATUS -->
+                <div class="bg-white p-3.5 rounded-2xl border border-purple-200 shadow-sm space-y-3">
+                    <div class="flex justify-between items-center border-b pb-2">
+                        <div class="flex items-center gap-2">
+                            <div class="w-7 h-7 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold text-xs">
+                                <i class="fa-solid fa-route"></i>
+                            </div>
+                            <div>
+                                <h4 class="text-xs font-bold text-purple-950">สถานะการเดินทางของน้องสมชาย</h4>
+                                <p class="text-[10px] text-slate-500">อัปเดตสัมพันธ์กับคนขับอัตโนมัติ</p>
+                            </div>
+                        </div>
+                        <div class="flex gap-1 bg-purple-100/80 p-1 rounded-xl text-[10px] font-bold">
+                            <button onclick="switchParentTripMode('morning')" id="trip-mode-btn-morning" class="px-2.5 py-1 rounded-lg bg-purple-700 text-white shadow">☀️ รอบเช้า</button>
+                            <button onclick="switchParentTripMode('evening')" id="trip-mode-btn-evening" class="px-2.5 py-1 rounded-lg text-slate-600 hover:text-slate-900">🌆 รอบเย็น</button>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-50 p-2 rounded-xl border border-slate-200 flex items-center justify-between text-[11px] overflow-x-auto">
+                        <span class="font-bold text-slate-700 whitespace-nowrap mr-2">เปลี่ยนขั้นตอน:</span>
+                        <div class="flex gap-1 overflow-x-auto" id="trip-simulator-buttons"></div>
+                    </div>
+
+                    <div class="space-y-2 pt-1" id="parent-trip-steps-container"></div>
+                </div>
+
+                <!-- BILLING & PAYMENT -->
+                <div class="bg-gradient-to-br from-purple-50 to-indigo-50 p-4 rounded-2xl border border-purple-200 space-y-3 shadow-sm" id="parent-billing-card">
+                    <div class="flex justify-between items-center">
+                        <div class="flex items-center gap-2">
+                            <div class="w-8 h-8 rounded-xl bg-purple-600 text-white flex items-center justify-center font-bold text-sm shadow">
+                                <i class="fa-solid fa-receipt"></i>
+                            </div>
+                            <div>
+                                <h4 class="text-xs font-bold text-purple-950">บิลค่ารถตู้ประจำเดือน (รอบวันที่ 2)</h4>
+                                <p class="text-[10px] text-purple-700" id="parent-bill-period">รอบวันที่: 2 ก.ย. - 2 ต.ค. 2026</p>
+                            </div>
+                        </div>
+                        <span id="parent-bill-status-badge" class="text-[10px] bg-amber-100 text-amber-900 font-bold px-2.5 py-1 rounded-full border border-amber-300 animate-pulse">
+                            ⌛ รอชำระเงิน
+                        </span>
+                    </div>
+
+                    <div class="bg-white p-3 rounded-xl border border-purple-100 flex justify-between items-center shadow-inner">
+                        <span class="text-xs text-slate-600 font-medium">ยอดชำระตามระยะทาง:</span>
+                        <span class="text-base font-black text-purple-900" id="parent-fee-display">฿2,500</span>
+                    </div>
+
+                    <p class="text-[11px] font-bold text-slate-700 text-center">👇 กรุณาเลือกรูปแบบการชำระเงินที่คุณแม่สะดวก:</p>
+
+                    <div class="grid grid-cols-2 gap-2 pt-0.5">
+                        <button onclick="openCashPaymentModal()" class="py-3 px-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-bold text-xs rounded-xl shadow-md transition flex flex-col items-center justify-center gap-1 active:scale-95">
+                            <i class="fa-solid fa-money-bill-wave text-lg text-emerald-200"></i>
+                            <span>💵 จ่ายเงินสด</span>
+                            <span class="text-[9px] font-normal text-emerald-100">(ฝากเงินกับลูก / ให้คนขับ)</span>
+                        </button>
+
+                        <button onclick="openQRPaymentModal()" class="py-3 px-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs rounded-xl shadow-md transition flex flex-col items-center justify-center gap-1 active:scale-95">
+                            <i class="fa-solid fa-qrcode text-lg text-amber-300"></i>
+                            <span>📲 โอนเงิน (พร้อมเพย์)</span>
+                            <span class="text-[9px] font-normal text-purple-200">(สแกน QR ผ่านแอปธนาคาร)</span>
+                        </button>
+                    </div>
+
+                    <div id="parent-payment-success-banner" class="hidden p-2.5 rounded-xl bg-emerald-100 border border-emerald-300 text-emerald-900 text-xs font-bold text-center"></div>
+                </div>
+
+                <button onclick="openChatScreen('นายศักดิ์ชัย (คนขับรถตู้)', 'คนขับรถตู้')" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs shadow transition flex items-center justify-center gap-2 active:scale-95">
+                    <i class="fa-solid fa-comments"></i>
+                    <span>ส่งข้อความ/โทรหาคนขับรถตู้ตัวต่อตัว</span>
+                </button>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ================= MODALS & POPUPS ================= -->
+
+    <!-- MODAL: CASH PAYMENT -->
+    <div id="cash-payment-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl border border-slate-100 text-center animate-scale-up">
+            <div class="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto text-2xl shadow-inner">
+                <i class="fa-solid fa-money-bill-wave"></i>
+            </div>
+            <div>
+                <h3 class="font-bold text-slate-900 text-base">ยืนยันการจ่ายด้วยเงินสด</h3>
+                <p class="text-xs text-slate-500 mt-1">ยอดชำระ: <strong class="text-emerald-700 text-sm font-bold" id="cash-modal-amount">฿2,500 บาท</strong></p>
+            </div>
+            <div class="bg-emerald-50 border border-emerald-200 p-3 rounded-2xl text-left space-y-2 text-xs text-emerald-950">
+                <p class="font-bold flex items-center gap-1.5">
+                    <i class="fa-solid fa-circle-info text-emerald-600"></i> วิธีการจ่ายเงินสด:
+                </p>
+                <div class="space-y-1 text-[11px] text-slate-700 pl-4 list-disc">
+                    <p>• ฝากซองเงินสดไว้กับนักเรียนเพื่อให้คนขับตอนขึ้นรถ</p>
+                    <p>• หรือส่งมอบเงินสดให้กับคนขับโดยตรงที่จุดรับส่ง</p>
+                </div>
+            </div>
+            <div class="space-y-2 pt-1">
+                <button onclick="confirmCashPayment()" class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-2xl shadow-lg transition flex items-center justify-center gap-1.5 active:scale-95">
+                    <i class="fa-solid fa-check-circle"></i>
+                    <span>✅ ยืนยันแจ้งคนขับว่า "จ่ายด้วยเงินสด"</span>
+                </button>
+                <button onclick="closeCashPaymentModal()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl transition">
+                    ย้อนกลับ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: PROMPTPAY QR (REAL EMVCO CODE) -->
+    <div id="qr-payment-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-3.5 shadow-2xl border border-slate-100 text-center max-h-[90vh] overflow-y-auto custom-scroll">
+            <div class="flex justify-between items-center border-b pb-2">
+                <h3 class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                    <i class="fa-solid fa-qrcode text-purple-600"></i> สแกนจ่ายผ่าน QR PromptPay
+                </h3>
+                <button onclick="closeQRPaymentModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="bg-purple-50 p-3 rounded-2xl border border-purple-200 space-y-2">
+                <p class="text-[11px] text-purple-900 font-bold">ชื่อบัญชี: <span id="qr-modal-driver-name">นายศักดิ์ชัย มีสุข</span></p>
+                <p class="text-[10px] text-slate-600">พร้อมเพย์: <strong class="text-purple-700 font-bold" id="qr-modal-driver-promptpay">0812345678</strong></p>
+                
+                <div class="bg-white p-3 rounded-2xl border border-purple-200 inline-block shadow-sm">
+                    <div id="promptpay-qrcode-container" class="flex justify-center items-center w-40 h-40 mx-auto"></div>
+                    <div class="mt-1 pt-1 border-t border-slate-100">
+                        <span class="text-xs font-black text-purple-900" id="qr-modal-amount-tag">ยอดชำระ: ฿2,500</span>
+                    </div>
+                </div>
+                <p class="text-[9px] text-slate-400">สร้างด้วยมาตรฐาน EMVCo PromptPay ของประเทศไทย</p>
+            </div>
+            <div class="space-y-2 pt-0.5">
+                <button onclick="confirmTransferPayment()" class="w-full py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs rounded-2xl shadow-lg transition flex items-center justify-center gap-1.5 active:scale-95">
+                    <i class="fa-solid fa-circle-check"></i>
+                    <span>✅ ยืนยันการโอนเงินเรียบร้อยแล้ว</span>
+                </button>
+                <button onclick="closeQRPaymentModal()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl transition">
+                    ย้อนกลับ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: VIEW DIGITAL SLIP -->
+    <div id="slip-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-3 shadow-2xl border border-slate-100 text-center">
+            <div class="flex justify-between items-center border-b pb-2">
+                <h3 class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                    <i class="fa-solid fa-file-invoice text-indigo-600"></i> หลักฐานสลิปการชำระเงิน
+                </h3>
+                <button onclick="closeSlipModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="bg-slate-50 p-4 rounded-2xl border border-slate-200 text-left space-y-2 text-xs">
+                <div class="flex justify-between border-b pb-2 text-slate-500 text-[10px]">
+                    <span>รหัสอ้างอิง: TR20260902-8874</span>
+                    <span id="slip-date">2 ก.ย. 2026 07:30</span>
+                </div>
+                <div class="space-y-1">
+                    <p class="text-slate-500 text-[10px]">ผู้โอนเงิน:</p>
+                    <p class="font-bold text-slate-900" id="slip-payer">คุณแม่นิด (ผู้ปกครอง)</p>
+                </div>
+                <div class="space-y-1">
+                    <p class="text-slate-500 text-[10px]">ผู้รับเงิน:</p>
+                    <p class="font-bold text-slate-900" id="slip-payee">นายศักดิ์ชัย มีสุข (พร้อมเพย์)</p>
+                </div>
+                <div class="p-2.5 bg-emerald-50 rounded-xl border border-emerald-200 flex justify-between items-center">
+                    <span class="font-bold text-emerald-900">จำนวนเงิน:</span>
+                    <span class="font-black text-emerald-700 text-base" id="slip-amount">฿2,500.00</span>
+                </div>
+                <p class="text-[10px] text-center text-emerald-700 font-bold mt-1">✓ ตรวจสอบสถานะการโอนเงินสำเร็จ</p>
+            </div>
+            <button onclick="closeSlipModal()" class="w-full py-2.5 bg-slate-800 text-white font-bold text-xs rounded-xl shadow">
+                ปิดหน้าต่าง
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: WEEKLY SCHEDULE (MON-FRI) -->
+    <div id="weekly-schedule-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto custom-scroll">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-calendar-week text-purple-600"></i> ตั้งค่าตารางรับ-ส่งประจำสัปดาห์
+                </h3>
+                <button onclick="closeWeeklyScheduleModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <p class="text-xs text-slate-500">กำหนดวันที่จะให้รถตู้แวะรับ-ส่งเป็นประจำในแต่ละสัปดาห์:</p>
+            
+            <div class="space-y-2 text-xs" id="weekly-days-list">
+                <!-- Dynamically generated Mon-Fri toggles -->
+            </div>
+
+            <button onclick="saveWeeklySchedule()" class="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-2xl text-xs shadow-lg transition active:scale-95">
+                💾 บันทึกการตั้งค่าตารางประจำสัปดาห์
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: CHAT SELECTION -->
+    <div id="chat-selection-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl border border-slate-100">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2" id="chat-select-title">
+                    <i class="fa-solid fa-comments text-indigo-600"></i> เลือกระหว่างแชทกับนักเรียนหรือผู้ปกครอง
+                </h3>
+                <button onclick="closeChatSelectionModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="space-y-2 text-xs" id="chat-selection-list"></div>
+        </div>
+    </div>
+
+    <!-- MODAL: VAN QR CODE & REGISTRATION -->
+    <div id="van-qr-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl border border-slate-100 text-center">
+            <div class="flex justify-between items-center border-b pb-2">
+                <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-qrcode text-indigo-600"></i> QR Code & รหัสประจำรถตู้
+                </h3>
+                <button onclick="closeVanQRModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="bg-indigo-50 border-2 border-indigo-200 p-4 rounded-2xl space-y-2 inline-block w-full">
+                <div id="van-actual-qrcode-box" class="w-36 h-36 bg-white border border-indigo-200 rounded-xl mx-auto flex items-center justify-center shadow-inner relative p-1"></div>
+                <p class="text-[10px] font-bold text-indigo-400 uppercase tracking-widest">VEHICLE CODE</p>
+                <p class="text-2xl font-black text-indigo-900 tracking-widest">V-98765</p>
+            </div>
+            <button onclick="simulateStudentScanRequest()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl text-xs shadow-lg transition active:scale-95">
+                🧪 จำลอง: นักเรียนใหม่สแกนขอเข้าร่วมรถตู้นี้
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: DRIVER ACCEPT STUDENT REQUEST -->
+    <div id="driver-accept-modal" class="fixed inset-0 bg-black/70 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl border border-slate-100 text-center">
+            <div class="w-14 h-14 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto text-2xl">
+                <i class="fa-solid fa-user-plus"></i>
+            </div>
+            <div>
+                <h3 class="font-bold text-slate-900 text-base">คำขอขึ้นรถตู้เพิ่ม!</h3>
+                <p class="text-xs text-slate-500 mt-1">มีการสแกน QR Code / ใส่รหัสรถตู้เข้ามา</p>
+            </div>
+            <div class="bg-slate-50 border border-slate-200 p-3 rounded-2xl text-left space-y-1 text-xs">
+                <p><strong>ชื่อนักเรียน:</strong> ด.ช. นพดล เรียนดี (น้องนพ)</p>
+                <p><strong>โรงเรียน:</strong> โรงเรียนนานาชาติร่วมฤดี</p>
+                <p><strong>ที่อยู่รับส่ง:</strong> หมู่บ้านพฤกษา ซอย 12</p>
+            </div>
+            <div class="space-y-2">
+                <button onclick="confirmAcceptStudent()" class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-2xl shadow-lg transition active:scale-95">
+                    ✅ ยอมรับขึ้นรถตู้ประจำคัน
+                </button>
+                <button onclick="closeAcceptModal()" class="w-full py-2 bg-slate-100 hover:bg-rose-100 text-slate-500 hover:text-rose-700 font-bold text-xs rounded-xl transition">
+                    ❌ ปฏิเสธ
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL: PROFILE EDIT -->
+    <div id="profile-edit-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto custom-scroll">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2" id="profile-modal-title">
+                    <i class="fa-solid fa-user-gear text-indigo-600"></i> ตั้งค่าแก้ไขข้อมูลส่วนตัว
+                </h3>
+                <button onclick="closeProfileEditModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-2.5 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex justify-between items-center text-xs">
+                <div class="flex items-center gap-2 font-bold">
+                    <i class="fa-solid fa-pen-to-square text-amber-600"></i>
+                    <span>สิทธิ์แก้ไขคงเหลือเดือนนี้:</span>
+                </div>
+                <span class="font-black text-amber-800 bg-amber-200 px-2.5 py-0.5 rounded-lg text-xs" id="quota-display-badge">3 / 3 ครั้ง</span>
+            </div>
+            <div class="space-y-3">
+                <div class="text-center space-y-2 bg-slate-50 p-3 rounded-2xl border border-slate-200">
+                    <label class="font-bold text-slate-700 text-xs block">รูปภาพโปรไฟล์ของคุณ:</label>
+                    <div class="relative w-20 h-20 mx-auto group cursor-pointer" onclick="document.getElementById('profile-image-input').click()">
+                        <div id="modal-avatar-preview" class="w-20 h-20 rounded-2xl bg-indigo-600 text-white font-black text-2xl flex items-center justify-center overflow-hidden border-2 border-indigo-400 shadow-md">
+                            <span id="modal-avatar-text">ศ</span>
+                            <img id="modal-avatar-img" class="w-full h-full object-cover hidden" alt="พรีวิว">
+                        </div>
+                    </div>
+                    <input type="file" id="profile-image-input" accept="image/*" class="hidden" onchange="previewProfileImage(event)">
+                </div>
+            </div>
+            <div class="space-y-3 text-xs" id="profile-form-fields"></div>
+            <button onclick="saveProfileChanges()" id="btn-save-profile" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl text-xs shadow-lg transition active:scale-95">
+                💾 บันทึกการแก้ไขข้อมูล
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: FARE SETTINGS & BANK ACCOUNT -->
+    <div id="fare-settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl border border-slate-100 max-h-[90vh] overflow-y-auto custom-scroll">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-sliders text-purple-600"></i> ตั้งค่าราคาค่ารถ & บัญชีรับเงิน
+                </h3>
+                <button onclick="closeFareSettingsModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            
+            <div class="p-3.5 bg-purple-50 border border-purple-200 rounded-2xl space-y-2.5 text-xs">
+                <p class="font-bold text-purple-950 flex items-center gap-1.5 border-b border-purple-200 pb-1.5">
+                    <i class="fa-solid fa-building-columns text-purple-700"></i> ข้อมูลบัญชีรับเงินของคนขับ
+                </p>
+                <div>
+                    <label class="font-bold text-slate-700 block mb-1">ชื่อบัญชีธนาคาร / พร้อมเพย์:</label>
+                    <input type="text" id="input-driver-account-name" value="นายศักดิ์ชัย มีสุข" class="w-full p-2.5 rounded-xl border border-purple-300 font-bold text-purple-900 focus:outline-none focus:border-purple-600 bg-white">
+                </div>
+                <div>
+                    <label class="font-bold text-slate-700 block mb-1">เบอร์พร้อมเพย์ (10 หลัก):</label>
+                    <input type="text" id="input-driver-promptpay" value="0812345678" class="w-full p-2.5 rounded-xl border border-purple-300 font-bold text-purple-900 focus:outline-none focus:border-purple-600 bg-white text-xs">
+                </div>
+            </div>
+
+            <div class="space-y-3 text-xs">
+                <p class="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                    <i class="fa-solid fa-user-gear text-purple-600"></i> ค่ารถนักเรียนรายบุคคล (บาท/เดือน):
+                </p>
+                <div id="fare-student-settings-container" class="space-y-2.5"></div>
+            </div>
+
+            <button onclick="saveCustomFareRates()" class="w-full py-3 bg-purple-700 hover:bg-purple-800 text-white font-bold rounded-2xl text-xs shadow-lg transition active:scale-95">
+                💾 บันทึกข้อมูลราคาและบัญชีรับเงิน
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: SCHOOL ROUTE SETTINGS -->
+    <div id="school-route-settings-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl border border-slate-100">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-route text-emerald-600"></i> ตั้งค่าลำดับโรงเรียนปลายทาง
+                </h3>
+                <button onclick="closeSchoolRouteSettingsModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <p class="text-xs text-slate-600">ปรับเปลี่ยนลำดับการแวะส่งโรงเรียน:</p>
+            <div class="space-y-2 text-xs" id="school-route-order-list"></div>
+            <button onclick="saveSchoolRouteOrder()" class="w-full py-3 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-2xl text-xs shadow-lg transition active:scale-95">
+                💾 บันทึกลำดับเส้นทาง
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: CUSTOM LOCATION / NOTE -->
+    <div id="custom-location-modal" class="fixed inset-0 bg-black/60 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-4 shadow-2xl border border-slate-100">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="font-bold text-slate-900 text-sm flex items-center gap-2">
+                    <i class="fa-solid fa-plus-circle text-amber-600"></i> เพิ่มหมายเหตุพิเศษ
+                </h3>
+                <button onclick="closeCustomLocationModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <textarea id="input-custom-location" rows="3" placeholder="พิมพ์รายละเอียด เช่น 'รอที่ป้อม รปภ. หมู่บ้าน', 'เลท 15 นาที'..." class="w-full p-3 rounded-xl border border-slate-300 text-xs focus:outline-none focus:border-amber-500"></textarea>
+            <button onclick="saveDraftCustomNote()" class="w-full py-3 bg-amber-500 hover:bg-amber-600 text-white font-bold rounded-2xl text-xs shadow transition active:scale-95">
+                💾 บันทึกฉบับร่าง
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: VIEW VAN PHOTO -->
+    <div id="view-van-photo-modal" class="fixed inset-0 bg-black/75 backdrop-blur-sm hidden items-center justify-center p-4 z-50">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-5 space-y-3 shadow-2xl border border-slate-100 text-center">
+            <div class="flex justify-between items-center border-b pb-2">
+                <h3 class="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                    <i class="fa-solid fa-van-shuttle text-amber-500"></i> รูปรถตู้ประจำคัน (V-98765)
+                </h3>
+                <button onclick="closeViewVanPhotoModal()" class="w-7 h-7 bg-slate-100 text-slate-500 rounded-full flex items-center justify-center hover:bg-slate-200">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="rounded-2xl overflow-hidden bg-slate-900 border border-slate-800 p-4 min-h-[180px] flex flex-col items-center justify-center text-white">
+                <div class="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-400/30 flex items-center justify-center text-3xl text-amber-400 mb-2">
+                    <i class="fa-solid fa-van-shuttle"></i>
+                </div>
+                <h4 class="font-bold text-sm text-amber-300">รถตู้ Toyota Commuter สีขาว</h4>
+                <p class="text-xs text-slate-300 mt-0.5">ทะเบียน: 3กข-1234 กรุงเทพมหานคร</p>
+                <span class="mt-2 text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/40 px-2.5 py-0.5 rounded-full font-bold">✓ ตรวจเช็กความปลอดภัยประจำสัปดาห์แล้ว</span>
+            </div>
+            <button onclick="closeViewVanPhotoModal()" class="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition">
+                ปิด
+            </button>
+        </div>
+    </div>
+
+    <!-- MODAL: DIRECT CALL SIMULATION -->
+    <div id="call-modal" class="fixed inset-0 bg-slate-950/90 backdrop-blur-md hidden items-center justify-center p-6 z-[600]">
+        <div class="text-center text-white space-y-6 max-w-xs w-full">
+            <div class="w-24 h-24 rounded-full bg-slate-800 border-4 border-emerald-500/50 flex items-center justify-center mx-auto text-4xl text-amber-400 shadow-2xl animate-pulse">
+                <i class="fa-solid fa-user"></i>
+            </div>
+            <div>
+                <h3 class="text-lg font-bold text-white" id="call-screen-name">นายศักดิ์ชัย มีสุข</h3>
+                <p class="text-xs text-emerald-400 mt-1" id="call-screen-status">กำลังโทรออกผ่านเครือข่าย...</p>
+                <p class="text-2xl font-mono font-bold mt-2" id="call-timer">00:00</p>
+            </div>
+            <div class="flex justify-center gap-6 pt-4">
+                <button onclick="endDirectCall()" class="w-16 h-16 rounded-full bg-rose-600 hover:bg-rose-700 text-white flex items-center justify-center text-2xl shadow-xl transition active:scale-95">
+                    <i class="fa-solid fa-phone-slash"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= SCRIPT LOGIC ================= -->
+    <script>
+        // State Variables
+        let isDrivingActive = false;
+        let driverStudentFilter = 'all';
+        let somchaiPaymentStatus = 'UNPAID';
+        let currentSomchaiFare = 2500;
+        let driverPromptPayNumber = "0812345678";
+        let driverAccountName = "นายศักดิ์ชัย มีสุข";
+
+        let editQuota = { driver: 3, student: 3, parent: 3 };
+        let activeEditRole = 'driver';
+
+        let sheetState = { driver: false, student: false, parent: false };
+
+        let isMorningGoTomorrow = true; 
+        let isEveningGo = true;          
+
+        let studentNoteState = 'none';
+        let activeNoteText = "";
+
+        let parentTripMode = 'morning';
+        let parentMorningStep = 1;
+        let parentEveningStep = 1;
+
+        let activeRole = 'driver';
+
+        // Profile Data Store
+        let profileData = {
+            driver: { name: "นายศักดิ์ชัย มีสุข (ลุงศักดิ์)", phone: "081-234-5678", vanCode: "V-98765", license: "3กข-1234 กทม.", image: null },
+            student: { name: "ด.ช. สมชาย ใจดี (น้องชาย)", phone: "089-111-2222", school: "โรงเรียนสาธิตพัฒนา", address: "หมู่บ้านมิตรภาพ ซอย 5 บ้านเลขที่ 12/34", image: null },
+            parent: { name: "คุณแม่นิด (ผู้ปกครอง)", phone: "086-777-8888", address: "หมู่บ้านมิตรภาพ ซอย 5 บ้านเลขที่ 12/34", image: null }
+        };
+
+        // Students Dataset
+        let driverStudentsList = [
+            { id: 1, name: "ด.ช. สมชาย ใจดี", nickname: "น้องชาย", school: "โรงเรียนสาธิตพัฒนา", address: "หมู่บ้านมิตรภาพ ซอย 5 บ้านเลขที่ 12/34", fare: 2500, isMorningGo: true, isEveningGo: true, boarded: false, statusNote: "ขึ้นรถปกติ", lat: 13.7580, lng: 100.5100 },
+            { id: 2, name: "ด.ญ. กานดา รักเรียน", nickname: "น้องกานดา", school: "โรงเรียนนานาชาติร่วมฤดี", address: "คอนโดสุขุมวิท 101 ชั้น 8", fare: 3500, isMorningGo: true, isEveningGo: true, boarded: false, statusNote: "ขอไปรอรถตู้สาย 10 นาที", lat: 13.7540, lng: 100.5250 },
+            { id: 3, name: "ด.ช. นพดล เรียนดี", nickname: "น้องนพ", school: "โรงเรียนนานาชาติร่วมฤดี", address: "หมู่บ้านพฤกษา ซอย 12", fare: 2800, isMorningGo: true, isEveningGo: true, boarded: false, statusNote: "ขึ้นรถปกติ", lat: 13.7630, lng: 100.5350 },
+            { id: 4, name: "ด.ญ. พิมพิไล ใจงาม", nickname: "น้องพิม", school: "โรงเรียนสาธิตพัฒนา", address: "ซอยอารีย์ 3 บ้านเลขที่ 9/99", fare: 2500, isMorningGo: false, isEveningGo: true, boarded: false, statusNote: "ลาหยุดรอบเช้า", lat: 13.7700, lng: 100.5400 }
+        ];
+
+        let schoolRouteOrder = ["โรงเรียนสาธิตพัฒนา", "โรงเรียนนานาชาติร่วมฤดี"];
+
+        let weeklySchedule = [
+            { day: "จันทร์ (Mon)", morning: true, evening: true },
+            { day: "อังคาร (Tue)", morning: true, evening: true },
+            { day: "พุธ (Wed)", morning: true, evening: true },
+            { day: "พฤหัสบดี (Thu)", morning: true, evening: true },
+            { day: "ศุกร์ (Fri)", morning: true, evening: true }
+        ];
+
+        // Maps Instances
+        let mapDriver, mapStudent, mapParent;
+        let vanMarkerDriver, vanMarkerStudent, vanMarkerParent;
+        let busPathPoints = [
+            [13.7563, 100.5018],
+            [13.7580, 100.5100],
+            [13.7540, 100.5250],
+            [13.7630, 100.5350],
+            [13.7680, 100.5450]
+        ];
+        let currentBusPointIdx = 0;
+        let busMoveInterval = null;
+
+        // Custom Toast Helper (Replaces alert)
+        function showToast(title, message, iconClass = "fa-solid fa-circle-check", bgIcon = "bg-emerald-500/20 text-emerald-400") {
+            const toast = document.getElementById('toast-box');
+            document.getElementById('toast-title').innerText = title;
+            document.getElementById('toast-msg').innerText = message;
+            const iconContainer = document.getElementById('toast-icon');
+            iconContainer.className = `w-8 h-8 rounded-xl ${bgIcon} flex items-center justify-center text-sm font-bold flex-shrink-0`;
+            iconContainer.innerHTML = `<i class="${iconClass}"></i>`;
+
+            toast.classList.remove('opacity-0', '-translate-y-5', 'pointer-events-none');
+            toast.classList.add('opacity-100', 'translate-y-0');
+
+            setTimeout(() => {
+                toast.classList.remove('opacity-100', 'translate-y-0');
+                toast.classList.add('opacity-0', '-translate-y-5', 'pointer-events-none');
+            }, 3200);
+        }
+
+        // ================= MAP SETUP (LEAFLET) =================
+        function initLeafletMaps() {
+            const startPos = busPathPoints[0];
+
+            function createVanIcon() {
+                return L.divIcon({
+                    className: 'leaflet-div-icon',
+                    html: `
+                        <div class="van-marker-pulse w-9 h-9 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center text-base font-black shadow-2xl border-2 border-white">
+                            <i class="fa-solid fa-van-shuttle"></i>
+                        </div>
+                    `,
+                    iconSize: [36, 36],
+                    iconAnchor: [18, 18]
+                });
+            }
+
+            function createSchoolIcon() {
+                return L.divIcon({
+                    className: 'leaflet-div-icon',
+                    html: `
+                        <div class="w-8 h-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center text-xs shadow-lg border-2 border-white">
+                            <i class="fa-solid fa-school"></i>
+                        </div>
+                    `,
+                    iconSize: [32, 32],
+                    iconAnchor: [16, 16]
+                });
+            }
+
+            function createStudentIcon() {
+                return L.divIcon({
+                    className: 'leaflet-div-icon',
+                    html: `
+                        <div class="w-7 h-7 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] shadow-md border-2 border-white">
+                            <i class="fa-solid fa-child"></i>
+                        </div>
+                    `,
+                    iconSize: [28, 28],
+                    iconAnchor: [14, 14]
+                });
+            }
+
+            // Driver Map
+            if (!mapDriver && document.getElementById('leaflet-map-driver')) {
+                mapDriver = L.map('leaflet-map-driver', { zoomControl: false }).setView(startPos, 14);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapDriver);
+                
+                L.polyline(busPathPoints, { color: '#6366f1', weight: 4, dashArray: '6, 8' }).addTo(mapDriver);
+                
+                // Add Markers
+                vanMarkerDriver = L.marker(startPos, { icon: createVanIcon() }).addTo(mapDriver).bindPopup("<b>รถตู้ V-98765</b><br>คนขับ: ลุงศักดิ์");
+                L.marker([13.7680, 100.5450], { icon: createSchoolIcon() }).addTo(mapDriver).bindPopup("<b>โรงเรียนสาธิตพัฒนา</b>");
+                L.marker([13.7540, 100.5250], { icon: createStudentIcon() }).addTo(mapDriver).bindPopup("<b>จุดรับ ด.ช. สมชาย</b>");
+            }
+
+            // Student Map
+            if (!mapStudent && document.getElementById('leaflet-map-student')) {
+                mapStudent = L.map('leaflet-map-student', { zoomControl: false }).setView(startPos, 14);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapStudent);
+                L.polyline(busPathPoints, { color: '#3b82f6', weight: 4, dashArray: '6, 8' }).addTo(mapStudent);
+                vanMarkerStudent = L.marker(startPos, { icon: createVanIcon() }).addTo(mapStudent).bindPopup("<b>รถตู้ลุงศักดิ์</b>");
+                L.marker([13.7680, 100.5450], { icon: createSchoolIcon() }).addTo(mapStudent);
+            }
+
+            // Parent Map
+            if (!mapParent && document.getElementById('leaflet-map-parent')) {
+                mapParent = L.map('leaflet-map-parent', { zoomControl: false }).setView(startPos, 14);
+                L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(mapParent);
+                L.polyline(busPathPoints, { color: '#a855f7', weight: 4, dashArray: '6, 8' }).addTo(mapParent);
+                vanMarkerParent = L.marker(startPos, { icon: createVanIcon() }).addTo(mapParent).bindPopup("<b>รถตู้รับ-ส่งน้องสมชาย</b>");
+                L.marker([13.7680, 100.5450], { icon: createSchoolIcon() }).addTo(mapParent);
+            }
+        }
+
+        function recenterMap() {
+            const pos = busPathPoints[currentBusPointIdx];
+            if (activeRole === 'driver' && mapDriver) mapDriver.setView(pos, 15);
+            else if (activeRole === 'student' && mapStudent) mapStudent.setView(pos, 15);
+            else if (activeRole === 'parent' && mapParent) mapParent.setView(pos, 15);
+        }
+
+        function triggerBusLiveSimulation() {
+            if (busMoveInterval) clearInterval(busMoveInterval);
+
+            busMoveInterval = setInterval(() => {
+                if (!isDrivingActive) return;
+                currentBusPointIdx = (currentBusPointIdx + 1) % busPathPoints.length;
+                const pos = busPathPoints[currentBusPointIdx];
+
+                if (vanMarkerDriver) vanMarkerDriver.setLatLng(pos);
+                if (vanMarkerStudent) vanMarkerStudent.setLatLng(pos);
+                if (vanMarkerParent) vanMarkerParent.setLatLng(pos);
+
+                // Update Parent status step automatically as the van travels
+                if (currentBusPointIdx === 1) {
+                    setParentStep(2);
+                } else if (currentBusPointIdx === 2) {
+                    setParentStep(3);
+                } else if (currentBusPointIdx === 3) {
+                    setParentStep(4);
+                } else if (currentBusPointIdx === 4) {
+                    setParentStep(5);
+                }
+            }, 4500);
+        }
+
+        // ================= DRIVER & STUDENT LOGIC =================
+        function initDriverStudentList() {
+            driverStudentsList[0].isMorningGo = isMorningGoTomorrow;
+            driverStudentsList[0].isEveningGo = isEveningGo;
+
+            const container = document.getElementById('driver-student-dynamic-list');
+            const summaryText = document.getElementById('driver-trip-summary-text');
+            const studentSummaryCard = document.getElementById('student-summary-text');
+            const activeSchoolBadge = document.getElementById('active-school-badge');
+            const activeSchoolCountLabel = document.getElementById('active-school-count-label');
+            const schoolListContainer = document.getElementById('school-list-container');
+            const noticeSummaryText = document.getElementById('notice-summary-text');
+
+            const pickupList = driverStudentsList.filter(s => s.isMorningGo);
+            const absentList = driverStudentsList.filter(s => !s.isMorningGo);
+            const pickupCount = pickupList.length;
+            const absentCount = absentList.length;
+
+            summaryText.innerHTML = `ต้องไปรับจริง <strong class="text-emerald-600 font-bold">${pickupCount}</strong> คน (ลา ${absentCount} คน)`;
+            studentSummaryCard.innerHTML = `<strong class="text-blue-700 font-bold">รับ ${pickupCount} | ลา ${absentCount} คน</strong>`;
+            noticeSummaryText.innerText = studentNoteState !== 'none' ? "มีคำขอใหม่ 1 รายการ" : "ไม่มีคำขอค้าง";
+
+            const activeSchools = [...new Set(pickupList.map(s => s.school))];
+            activeSchoolBadge.innerText = `${activeSchools.length} โรงเรียน`;
+            activeSchoolCountLabel.innerText = activeSchools.length;
+
+            // Render School List
+            if (activeSchools.length === 0) {
+                schoolListContainer.innerHTML = `<div class="p-3 bg-white text-center rounded-xl text-slate-400 text-xs">ไม่มีโรงเรียนที่ต้องแวะส่ง (นักเรียนลาหมด)</div>`;
+            } else {
+                schoolListContainer.innerHTML = activeSchools.map((schoolName, idx) => `
+                    <div class="p-2.5 bg-white rounded-xl border border-emerald-100 flex justify-between items-center shadow-sm">
+                        <div>
+                            <p class="font-bold text-emerald-800 text-xs">${idx + 1}. ${schoolName}</p>
+                            <p class="text-[10px] text-slate-500">📍 นักเรียนส่งปลายทางนี้: ${pickupList.filter(s => s.school === schoolName).length} คน</p>
+                        </div>
+                        <span class="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-2 py-0.5 rounded-md">จุดที่ ${idx + 1}</span>
+                    </div>
+                `).join('');
+            }
+
+            // Filter List
+            let filteredList = [];
+            if (driverStudentFilter === 'all') filteredList = driverStudentsList.filter(s => s.isMorningGo);
+            else if (driverStudentFilter === 'boarded') filteredList = driverStudentsList.filter(s => s.isMorningGo && s.boarded);
+            else if (driverStudentFilter === 'pending') filteredList = driverStudentsList.filter(s => s.isMorningGo && !s.boarded);
+            else if (driverStudentFilter === 'absent') filteredList = driverStudentsList.filter(s => !s.isMorningGo);
+
+            if (filteredList.length === 0) {
+                container.innerHTML = `<div class="p-4 bg-white text-center rounded-xl text-slate-400 text-xs">ไม่มีรายชื่อในหมวดหมู่นี้</div>`;
+                return;
+            }
+
+            container.innerHTML = filteredList.map(s => {
+                let cardBg = "bg-amber-50/70 border-amber-200";
+                let badgeHtml = `<button onclick="toggleDriverBoard(${s.id})" class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-[10px] px-2.5 py-1.5 rounded-lg shadow active:scale-95 transition">🟡 กดรับขึ้นรถ</button>`;
+                let statusBadgeText = `<span class="text-[9px] bg-amber-200 text-amber-900 font-bold px-1.5 py-0.5 rounded">🟡 ยังไม่ขึ้น</span>`;
+
+                if (!s.isMorningGo) {
+                    cardBg = "bg-rose-50/70 border-rose-200";
+                    badgeHtml = `<span class="text-rose-600 font-bold text-[10px] bg-rose-100 px-2 py-1 rounded-lg border border-rose-200">🔴 ลา</span>`;
+                    statusBadgeText = `<span class="text-[9px] bg-rose-200 text-rose-900 font-bold px-1.5 py-0.5 rounded">🔴 ลา</span>`;
+                } else if (s.boarded) {
+                    cardBg = "bg-emerald-50/80 border-emerald-200";
+                    badgeHtml = `<button onclick="toggleDriverBoard(${s.id})" class="text-emerald-700 font-bold text-[10px] bg-emerald-100 px-2 py-1 rounded-lg border border-emerald-300 hover:bg-emerald-200 active:scale-95 transition">✅ ขึ้นรถแล้ว (กดยกเลิก)</button>`;
+                    statusBadgeText = `<span class="text-[9px] bg-emerald-200 text-emerald-900 font-bold px-1.5 py-0.5 rounded">🟢 ขึ้นแล้ว</span>`;
+                }
+
+                return `
+                    <div class="p-3 rounded-2xl border flex justify-between items-center shadow-sm ${cardBg} transition-all">
+                        <div>
+                            <div class="flex items-center gap-1.5">
+                                <p class="font-bold text-slate-900 text-xs">${s.name} (${s.nickname})</p>
+                                ${statusBadgeText}
+                            </div>
+                            <p class="text-[10px] text-slate-600 font-medium mt-0.5">${s.school}</p>
+                            <p class="text-[9px] text-slate-500">หมายเหตุ: ${s.statusNote}</p>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            ${badgeHtml}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterDriverStudents(filter) {
+            driverStudentFilter = filter;
+            const btnAll = document.getElementById('driver-filter-all');
+            const btnBoarded = document.getElementById('driver-filter-boarded');
+            const btnPending = document.getElementById('driver-filter-pending');
+            const btnAbsent = document.getElementById('driver-filter-absent');
+
+            [btnAll, btnBoarded, btnPending, btnAbsent].forEach(btn => {
+                btn.className = "py-1.5 rounded-lg text-slate-600 hover:text-slate-900 transition";
+            });
+
+            if (filter === 'all') btnAll.className = "py-1.5 rounded-lg bg-indigo-600 text-white shadow font-bold";
+            else if (filter === 'boarded') btnBoarded.className = "py-1.5 rounded-lg bg-emerald-600 text-white shadow font-bold";
+            else if (filter === 'pending') btnPending.className = "py-1.5 rounded-lg bg-amber-500 text-slate-950 shadow font-bold";
+            else if (filter === 'absent') btnAbsent.className = "py-1.5 rounded-lg bg-rose-600 text-white shadow font-bold";
+
+            initDriverStudentList();
+        }
+
+        function toggleDriverBoard(id) {
+            const student = driverStudentsList.find(s => s.id === id);
+            if (student) {
+                student.boarded = !student.boarded;
+                initDriverStudentList();
+                if (student.id === 1) {
+                    if (student.boarded) setParentStep(2);
+                    else setParentStep(1);
+                }
+                showToast("อัปเดตสถานะขึ้นรถ", `${student.name} (${student.boarded ? 'ขึ้นรถแล้ว' : 'ยังไม่ขึ้นรถ'})`);
+            }
+        }
+
+        function toggleDriveState() {
+            const btnMain = document.getElementById('main-drive-btn');
+            const iconMain = document.getElementById('main-drive-icon');
+            const textMain = document.getElementById('main-drive-text');
+            const dot = document.getElementById('map-status-dot');
+            const statusText = document.getElementById('map-status-text');
+            
+            const btnStudents = document.getElementById('btn-box-students');
+            const btnSchool = document.getElementById('btn-box-school');
+            const btnNotice = document.getElementById('btn-box-notice');
+
+            const studentBanner = document.getElementById('banner-van-status-text');
+            const studentBadge = document.getElementById('banner-van-badge');
+            const studentDot = document.getElementById('student-van-dot');
+            const studentDotText = document.getElementById('student-van-text-badge');
+
+            const parentDot = document.getElementById('parent-van-dot');
+            const parentDotText = document.getElementById('parent-van-text-badge');
+
+            if (!isDrivingActive) {
+                isDrivingActive = true;
+                btnMain.className = "w-full py-3.5 px-6 rounded-2xl bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm shadow-xl transition-all flex items-center justify-center gap-2 border border-emerald-500 animate-pulse active:scale-[0.99]";
+                iconMain.className = "fa-solid fa-stop text-white";
+                textMain.innerText = "สิ้นสุดการวิ่งรถ (End Trip)";
+                dot.className = "w-3 h-3 rounded-full bg-emerald-500 animate-ping";
+                statusText.innerText = "กำลังวิ่ง";
+                statusText.className = "text-[10px] font-bold text-emerald-400";
+
+                btnStudents.className = "p-2.5 rounded-2xl bg-blue-50 border border-blue-300 text-left transition flex flex-col justify-between shadow-sm cursor-pointer hover:bg-blue-100 h-[72px]";
+                btnStudents.disabled = false;
+
+                btnSchool.className = "p-2.5 rounded-2xl bg-emerald-50 border border-emerald-300 text-left transition flex flex-col justify-between shadow-sm cursor-pointer hover:bg-emerald-100 h-[72px]";
+                btnSchool.disabled = false;
+
+                btnNotice.className = "p-2.5 rounded-2xl bg-amber-50 border border-amber-300 text-left transition flex flex-col justify-between shadow-sm cursor-pointer hover:bg-amber-100 relative h-[72px]";
+                btnNotice.disabled = false;
+
+                studentBanner.innerText = "🚗 รถตู้เริ่มออกเดินทางแล้ว (กำลังไปรับตามจุด)";
+                studentBadge.className = "text-[9px] bg-emerald-500 text-white font-bold px-2 py-1 rounded-lg animate-pulse";
+                studentBadge.innerText = "กำลังวิ่ง";
+                studentDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block mr-1 animate-ping";
+                studentDotText.innerText = "วิ่งอยู่";
+
+                parentDot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block mr-1 animate-ping";
+                parentDotText.innerText = "วิ่งอยู่";
+
+                initDriverStudentList();
+                triggerBusLiveSimulation();
+                showToast("เริ่มการวิ่งรถ", "รถตู้เริ่มเดินทางแล้ว ระบบแจ้งพิกัดสดให้ผู้ปกครองและนักเรียน");
+            } else {
+                isDrivingActive = false;
+                if (busMoveInterval) clearInterval(busMoveInterval);
+
+                ['panel-students', 'panel-school', 'panel-notice', 'panel-payment-schedule'].forEach(id => {
+                    document.getElementById(id).classList.remove('open');
+                });
+
+                btnMain.className = "w-full py-3.5 px-6 rounded-2xl bg-slate-800 hover:bg-slate-700 text-white font-bold text-sm shadow-xl transition-all flex items-center justify-center gap-2 border border-slate-700 active:scale-[0.99]";
+                iconMain.className = "fa-solid fa-play text-amber-400";
+                textMain.innerText = "กดเพื่อเริ่มวิ่งรถ (Start Trip)";
+                dot.className = "w-3 h-3 rounded-full bg-slate-400 shadow-sm";
+                statusText.innerText = "จอด";
+                statusText.className = "text-[10px] font-bold text-slate-300";
+
+                btnStudents.className = "p-2.5 rounded-2xl bg-slate-100 border border-slate-200 text-left transition flex flex-col justify-between opacity-60 cursor-not-allowed h-[72px]";
+                btnStudents.disabled = true;
+
+                btnSchool.className = "p-2.5 rounded-2xl bg-slate-100 border border-slate-200 text-left transition flex flex-col justify-between opacity-60 cursor-not-allowed h-[72px]";
+                btnSchool.disabled = true;
+
+                btnNotice.className = "p-2.5 rounded-2xl bg-slate-100 border border-slate-200 text-left transition flex flex-col justify-between opacity-60 cursor-not-allowed relative h-[72px]";
+                btnNotice.disabled = true;
+
+                studentBanner.innerText = "🛑 รถตู้ยังไม่เริ่มวิ่ง (ประจำจุดจอด)";
+                studentBadge.className = "text-[9px] bg-slate-700 text-slate-300 font-bold px-2 py-1 rounded-lg";
+                studentBadge.innerText = "รอเริ่มวิ่ง";
+                studentDot.className = "w-2.5 h-2.5 rounded-full bg-slate-400 inline-block mr-1";
+                studentDotText.innerText = "จอดอยู่";
+
+                parentDot.className = "w-2.5 h-2.5 rounded-full bg-slate-400 inline-block mr-1";
+                parentDotText.innerText = "จอดอยู่";
+
+                showToast("สิ้นสุดรอบการวิ่ง", "บันทึกการเดินทางรอบนี้เรียบร้อยแล้ว");
+            }
+        }
+
+        // ================= EMVCO PROMPTPAY QR GENERATOR =================
+        function generatePromptPayPayload(targetPhone, amount) {
+            let formattedPhone = targetPhone.replace(/[^0-9]/g, '');
+            if (formattedPhone.startsWith('0')) {
+                formattedPhone = '0066' + formattedPhone.substring(1);
+            }
+            const phoneField = `01${String(formattedPhone.length).padStart(2, '0')}${formattedPhone}`;
+            const aid = '0016A000000677010111';
+            const merchantInfo = `29${String((aid + phoneField).length).padStart(2, '0')}${aid}${phoneField}`;
+            
+            let payload = `000201010212${merchantInfo}5802TH5303764`;
+            if (amount && Number(amount) > 0) {
+                const amountStr = Number(amount).toFixed(2);
+                payload += `54${String(amountStr.length).padStart(2, '0')}${amountStr}`;
+            }
+            payload += '6304';
+
+            // CRC16 Calculation
+            let crc = 0xFFFF;
+            for (let c = 0; c < payload.length; c++) {
+                crc ^= payload.charCodeAt(c) << 8;
+                for (let i = 0; i < 8; i++) {
+                    if (crc & 0x8000) crc = (crc << 1) ^ 0x1021;
+                    else crc = crc << 1;
+                    crc &= 0xFFFF;
+                }
+            }
+            const hexCRC = crc.toString(16).toUpperCase().padStart(4, '0');
+            return payload + hexCRC;
+        }
+
+        function openQRPaymentModal() {
+            document.getElementById('qr-modal-driver-name').innerText = driverAccountName;
+            document.getElementById('qr-modal-driver-promptpay').innerText = driverPromptPayNumber;
+            document.getElementById('qr-modal-amount-tag').innerText = `ยอดชำระ: ฿${currentSomchaiFare.toLocaleString()}`;
+
+            const qrContainer = document.getElementById('promptpay-qrcode-container');
+            qrContainer.innerHTML = "";
+            
+            const promptPayString = generatePromptPayPayload(driverPromptPayNumber, currentSomchaiFare);
+            new QRCode(qrContainer, {
+                text: promptPayString,
+                width: 150,
+                height: 150,
+                colorDark : "#312e81",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.M
+            });
+
+            document.getElementById('qr-payment-modal').classList.remove('hidden');
+            document.getElementById('qr-payment-modal').classList.add('flex');
+        }
+
+        function closeQRPaymentModal() {
+            document.getElementById('qr-payment-modal').classList.remove('flex');
+            document.getElementById('qr-payment-modal').classList.add('hidden');
+        }
+
+        function confirmTransferPayment() {
+            somchaiPaymentStatus = 'PAID_TRANSFER';
+            closeQRPaymentModal();
+            updateParentBillingUI();
+            syncDriverPaymentUI();
+            showToast("โอนเงินสำเร็จ", "ส่งหลักฐานการโอนเข้าสู่ระบบคนขับเรียบร้อยแล้ว");
+        }
+
+        // Cash Modal
+        function openCashPaymentModal() {
+            document.getElementById('cash-modal-amount').innerText = `฿${currentSomchaiFare.toLocaleString()} บาท`;
+            document.getElementById('cash-payment-modal').classList.remove('hidden');
+            document.getElementById('cash-payment-modal').classList.add('flex');
+        }
+        function closeCashPaymentModal() {
+            document.getElementById('cash-payment-modal').classList.remove('flex');
+            document.getElementById('cash-payment-modal').classList.add('hidden');
+        }
+        function confirmCashPayment() {
+            somchaiPaymentStatus = 'CASH_PENDING';
+            closeCashPaymentModal();
+            updateParentBillingUI();
+            syncDriverPaymentUI();
+            showToast("แจ้งจ่ายเงินสด", "แจ้งคนขับเรียบร้อยแล้ว กรุณาส่งมอบเงินสดให้น้องหรือคนขับ");
+        }
+
+        function updateParentBillingUI() {
+            const badge = document.getElementById('parent-bill-status-badge');
+            const banner = document.getElementById('parent-payment-success-banner');
+
+            if (somchaiPaymentStatus === 'CASH_PENDING') {
+                badge.className = "text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2.5 py-1 rounded-full border border-emerald-300";
+                badge.innerText = "💵 แจ้งจ่ายเงินสดแล้ว";
+                banner.classList.remove('hidden');
+                banner.innerHTML = `<p>✅ แจ้งจ่ายเงินสดจำนวน ฿${currentSomchaiFare.toLocaleString()} บาท เรียบร้อย</p>`;
+            } else if (somchaiPaymentStatus === 'PAID_TRANSFER') {
+                badge.className = "text-[10px] bg-emerald-500 text-white font-bold px-2.5 py-1 rounded-full shadow";
+                badge.innerText = "✅ โอนเงินเรียบร้อยแล้ว";
+                banner.classList.remove('hidden');
+                banner.innerHTML = `<p>✅ โอนเงินผ่าน PromptPay QR เรียบร้อยแล้ว (฿${currentSomchaiFare.toLocaleString()})</p>`;
+            }
+        }
+
+        function syncDriverPaymentUI() {
+            const badge = document.getElementById('driver-pay-badge-somchai');
+            const note = document.getElementById('driver-pay-method-note-somchai');
+            const actions = document.getElementById('driver-pay-action-buttons-somchai');
+
+            if (somchaiPaymentStatus === 'CASH_PENDING') {
+                badge.className = "text-amber-800 font-bold text-[10px] bg-amber-100 px-2 py-0.5 rounded-md border border-amber-300";
+                badge.innerText = "💵 ผู้ปกครองแจ้งจ่ายเงินสด";
+                note.innerHTML = `<span class="text-amber-800 font-bold">รอรับเงินสด ฿${currentSomchaiFare.toLocaleString()}</span>`;
+                actions.innerHTML = `<button onclick="driverConfirmReceivedCash()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-[9px] font-bold px-2.5 py-1 rounded-lg shadow active:scale-95">✅ รับเงินแล้ว</button>`;
+            } else if (somchaiPaymentStatus === 'PAID_TRANSFER') {
+                badge.className = "text-purple-700 font-bold text-[10px] bg-purple-100 px-2 py-0.5 rounded-md border border-purple-300";
+                badge.innerText = "📲 โอนเงินผ่าน QR แล้ว";
+                note.innerHTML = `<span class="text-purple-800 font-bold">ยอด ฿${currentSomchaiFare.toLocaleString()} เข้าพร้อมเพย์</span>`;
+            }
+        }
+
+        function driverConfirmReceivedCash() {
+            somchaiPaymentStatus = 'PAID_CASH';
+            syncDriverPaymentUI();
+            updateParentBillingUI();
+            showToast("ยืนยันรับเงิน", "คนขับบันทึกรับเงินสดเรียบร้อยแล้ว");
+        }
+
+        // Slip Viewer
+        function openSlipModal(studentName, amount) {
+            document.getElementById('slip-payer').innerText = studentName === 'ด.ช. สมชาย ใจดี' ? "คุณแม่นิด (ผู้ปกครอง)" : "คุณพ่อชัย (ผู้ปกครอง)";
+            document.getElementById('slip-payee').innerText = `${driverAccountName} (${driverPromptPayNumber})`;
+            document.getElementById('slip-amount').innerText = `฿${amount.toLocaleString()}.00`;
+            document.getElementById('slip-modal').classList.remove('hidden');
+            document.getElementById('slip-modal').classList.add('flex');
+        }
+        function closeSlipModal() {
+            document.getElementById('slip-modal').classList.remove('flex');
+            document.getElementById('slip-modal').classList.add('hidden');
+        }
+
+        // Parent Trip Steps
+        function switchParentTripMode(mode) {
+            parentTripMode = mode;
+            const btnMorning = document.getElementById('trip-mode-btn-morning');
+            const btnEvening = document.getElementById('trip-mode-btn-evening');
+
+            if (mode === 'morning') {
+                btnMorning.className = "px-2.5 py-1 rounded-lg bg-purple-700 text-white shadow";
+                btnEvening.className = "px-2.5 py-1 rounded-lg text-slate-600 hover:text-slate-900";
+            } else {
+                btnEvening.className = "px-2.5 py-1 rounded-lg bg-purple-700 text-white shadow";
+                btnMorning.className = "px-2.5 py-1 rounded-lg text-slate-600 hover:text-slate-900";
+            }
+            renderParentTripStatusUI();
+        }
+
+        function setParentStep(step) {
+            if (parentTripMode === 'morning') parentMorningStep = step;
+            else parentEveningStep = step;
+            renderParentTripStatusUI();
+        }
+
+        function renderParentTripStatusUI() {
+            const simulator = document.getElementById('trip-simulator-buttons');
+            const stepsContainer = document.getElementById('parent-trip-steps-container');
+
+            const morningSteps = [
+                { step: 1, label: "กำลังรอขึ้นรถ" },
+                { step: 2, label: "ขึ้นรถแล้ว" },
+                { step: 3, label: "กำลังเดินทาง" },
+                { step: 4, label: "ใกล้ถึงโรงเรียน" },
+                { step: 5, label: "ถึงโรงเรียนแล้ว" }
+            ];
+
+            const eveningSteps = [
+                { step: 1, label: "กำลังรอรถกลับ" },
+                { step: 2, label: "ขึ้นรถแล้ว" },
+                { step: 3, label: "กำลังกลับบ้าน" },
+                { step: 4, label: "ใกล้ถึงบ้านแล้ว" },
+                { step: 5, label: "ถึงบ้านแล้ว" }
+            ];
+
+            const currentSteps = parentTripMode === 'morning' ? morningSteps : eveningSteps;
+            const currentActiveStep = parentTripMode === 'morning' ? parentMorningStep : parentEveningStep;
+
+            simulator.innerHTML = currentSteps.map(s => `
+                <button onclick="setParentStep(${s.step})" class="px-2 py-1 rounded-lg text-[10px] font-bold whitespace-nowrap transition active:scale-95 ${currentActiveStep === s.step ? 'bg-purple-700 text-white shadow' : 'bg-white text-slate-600 border border-slate-200'}">
+                    ${s.step}. ${s.label}
+                </button>
+            `).join('');
+
+            stepsContainer.innerHTML = currentSteps.map(s => {
+                const isDone = s.step < currentActiveStep;
+                const isCurrent = s.step === currentActiveStep;
+
+                let iconClass = "fa-solid fa-circle text-[9px] text-slate-300";
+                let textClass = "text-slate-400 font-medium";
+                let bgClass = "bg-white border-slate-100";
+
+                if (isDone) {
+                    iconClass = "fa-solid fa-circle-check text-emerald-600 text-xs";
+                    textClass = "text-slate-700 font-semibold";
+                    bgClass = "bg-emerald-50/50 border-emerald-200";
+                } else if (isCurrent) {
+                    iconClass = "fa-solid fa-spinner fa-spin text-purple-600 text-xs";
+                    textClass = "text-purple-950 font-black";
+                    bgClass = "bg-purple-100/90 border-purple-300 shadow-sm";
+                }
+
+                return `
+                    <div class="p-2.5 rounded-xl border flex items-center justify-between transition-all ${bgClass}">
+                        <div class="flex items-center gap-2.5">
+                            <div class="w-6 h-6 rounded-full bg-white flex items-center justify-center shadow-sm">
+                                <i class="${iconClass}"></i>
+                            </div>
+                            <span class="text-xs ${textClass}">ขั้นที่ ${s.step}: ${s.label}</span>
+                        </div>
+                        ${isCurrent ? `<span class="text-[9px] bg-purple-700 text-white font-bold px-2 py-0.5 rounded-full shadow-sm">กำลังดำเนินการ</span>` : (isDone ? `<span class="text-[9px] text-emerald-700 font-bold">สำเร็จ</span>` : ``)}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Student Schedule Settings
+        function setMorningStatus(status) {
+            isMorningGoTomorrow = status;
+            updateStudentScheduleUI();
+            initDriverStudentList();
+            showToast("บันทึกสถานะรอบเช้า", status ? "แจ้งขึ้นรถรอบเช้าปกติ" : "แจ้งลาหยุดรอบเช้า");
+        }
+
+        function setEveningStatus(status) {
+            isEveningGo = status;
+            updateStudentScheduleUI();
+            initDriverStudentList();
+            showToast("บันทึกสถานะรอบเย็น", status ? "แจ้งกลับรถตู้รอบเย็นปกติ" : "แจ้งไม่กลับรถตู้รอบเย็น");
+        }
+
+        function setFullDayLeave() {
+            isMorningGoTomorrow = false;
+            isEveningGo = false;
+            updateStudentScheduleUI();
+            initDriverStudentList();
+            showToast("แจ้งลาทั้งวัน", "บันทึกสถานะลาทั้งรอบเช้าและรอบเย็นเรียบร้อยแล้ว", "fa-solid fa-umbrella-beach", "bg-rose-500/20 text-rose-400");
+        }
+
+        function updateStudentScheduleUI() {
+            const btnMorningGo = document.getElementById('btn-morning-go');
+            const btnMorningSkip = document.getElementById('btn-morning-skip');
+            const btnEveningGo = document.getElementById('btn-evening-go');
+            const btnEveningSkip = document.getElementById('btn-evening-skip');
+            const display = document.getElementById('student-self-status-display');
+            const badge = document.getElementById('student-self-badge');
+
+            if (isMorningGoTomorrow) {
+                btnMorningGo.className = "py-2.5 px-2 bg-emerald-600 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1 active:scale-95";
+                btnMorningSkip.className = "py-2.5 px-2 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center gap-1 active:scale-95";
+            } else {
+                btnMorningSkip.className = "py-2.5 px-2 bg-rose-600 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1 active:scale-95";
+                btnMorningGo.className = "py-2.5 px-2 bg-slate-100 hover:bg-emerald-100 text-slate-600 hover:text-emerald-700 font-bold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center gap-1 active:scale-95";
+            }
+
+            if (isEveningGo) {
+                btnEveningGo.className = "py-2.5 px-2 bg-blue-600 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1 active:scale-95";
+                btnEveningSkip.className = "py-2.5 px-2 bg-slate-100 hover:bg-rose-100 text-slate-600 hover:text-rose-700 font-bold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center gap-1 active:scale-95";
+            } else {
+                btnEveningSkip.className = "py-2.5 px-2 bg-purple-600 text-white font-bold text-xs rounded-xl shadow transition flex items-center justify-center gap-1 active:scale-95";
+                btnEveningGo.className = "py-2.5 px-2 bg-slate-100 hover:bg-blue-100 text-slate-600 hover:text-blue-700 font-bold text-xs rounded-xl border border-slate-200 transition flex items-center justify-center gap-1 active:scale-95";
+            }
+
+            if (isMorningGoTomorrow && isEveningGo) {
+                display.innerText = "✅ ไปโรงเรียน & กลับรถตู้ปกติ";
+                badge.className = "text-xs bg-emerald-500 text-white font-bold px-2.5 py-1 rounded-xl shadow";
+                badge.innerText = "ปกติ";
+            } else if (!isMorningGoTomorrow && !isEveningGo) {
+                display.innerText = "🏖️ ลาทั้งวัน";
+                badge.className = "text-xs bg-rose-500 text-white font-bold px-2.5 py-1 rounded-xl shadow";
+                badge.innerText = "ลาทั้งวัน";
+            } else if (!isMorningGoTomorrow && isEveningGo) {
+                display.innerText = "🚗 เช้าไม่ขึ้นรถ • เย็นกลับปกติ";
+                badge.className = "text-xs bg-amber-500 text-white font-bold px-2.5 py-1 rounded-xl shadow";
+                badge.innerText = "เย็นกลับ";
+            } else if (isMorningGoTomorrow && !isEveningGo) {
+                display.innerText = "☀️ เช้าไปรถตู้ • 🚫 เย็นไม่กลับ";
+                badge.className = "text-xs bg-purple-600 text-white font-bold px-2.5 py-1 rounded-xl shadow";
+                badge.innerText = "เย็นไม่กลับ";
+            }
+        }
+
+        // Weekly Schedule Modal
+        function openWeeklyScheduleModal() {
+            const list = document.getElementById('weekly-days-list');
+            list.innerHTML = weeklySchedule.map((item, idx) => `
+                <div class="p-3 bg-slate-50 border border-slate-200 rounded-2xl flex justify-between items-center">
+                    <span class="font-bold text-slate-800 text-xs">${item.day}</span>
+                    <div class="flex gap-1.5">
+                        <button onclick="toggleWeeklyDay(${idx}, 'morning')" class="px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${item.morning ? 'bg-emerald-600 text-white shadow' : 'bg-slate-200 text-slate-500'}">
+                            ☀️ เช้า
+                        </button>
+                        <button onclick="toggleWeeklyDay(${idx}, 'evening')" class="px-2.5 py-1 rounded-lg text-[10px] font-bold transition ${item.evening ? 'bg-blue-600 text-white shadow' : 'bg-slate-200 text-slate-500'}">
+                            🌆 เย็น
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+            document.getElementById('weekly-schedule-modal').classList.remove('hidden');
+            document.getElementById('weekly-schedule-modal').classList.add('flex');
+        }
+
+        function toggleWeeklyDay(idx, shift) {
+            weeklySchedule[idx][shift] = !weeklySchedule[idx][shift];
+            openWeeklyScheduleModal();
+        }
+
+        function closeWeeklyScheduleModal() {
+            document.getElementById('weekly-schedule-modal').classList.remove('flex');
+            document.getElementById('weekly-schedule-modal').classList.add('hidden');
+        }
+
+        function saveWeeklySchedule() {
+            closeWeeklyScheduleModal();
+            showToast("บันทึกตารางสัปดาห์", "บันทึกรูปแบบการรับ-ส่งประจำสัปดาห์เรียบร้อยแล้ว");
+        }
+
+        // Student Requests & Notes
+        function requestLateTime(minutes) {
+            activeNoteText = `ขอไปรอรถตู้สาย ${minutes} นาที`;
+            studentNoteState = 'draft';
+            renderStudentNoteCard();
+            showToast("บันทึกฉบับร่าง", `ร่างข้อความ "ขอเลท ${minutes} นาที" เรียบร้อย`);
+        }
+
+        function openCustomLocationNoteModal() {
+            document.getElementById('custom-location-modal').classList.remove('hidden');
+            document.getElementById('custom-location-modal').classList.add('flex');
+        }
+
+        function closeCustomLocationModal() {
+            document.getElementById('custom-location-modal').classList.remove('flex');
+            document.getElementById('custom-location-modal').classList.add('hidden');
+        }
+
+        function saveDraftCustomNote() {
+            const val = document.getElementById('input-custom-location').value;
+            if (!val.trim()) return;
+            activeNoteText = val.trim();
+            studentNoteState = 'draft';
+            closeCustomLocationModal();
+            renderStudentNoteCard();
+            showToast("บันทึกฉบับร่าง", "ร่างหมายเหตุพิเศษเรียบร้อยแล้ว");
+        }
+
+        function sendDraftNotice() {
+            if (!activeNoteText) return;
+            studentNoteState = 'pending';
+            renderStudentNoteCard();
+            document.getElementById('notice-student-fullname').innerText = `${profileData.student.name}`;
+            document.getElementById('driver-notice-text-content').innerText = `📍 หมายเหตุ: ${activeNoteText}`;
+            document.getElementById('notice-ping-dot').classList.remove('hidden');
+            initDriverStudentList();
+            showToast("ส่งคำขอแล้ว", "ส่งหมายเหตุไปยังคนขับรถตู้เรียบร้อยแล้ว");
+        }
+
+        function deleteDraftNotice() {
+            studentNoteState = 'none';
+            activeNoteText = "";
+            renderStudentNoteCard();
+            initDriverStudentList();
+        }
+
+        function renderStudentNoteCard() {
+            const box = document.getElementById('student-active-notice-box');
+            const textEl = document.getElementById('student-active-notice-text');
+            const badge = document.getElementById('student-notice-badge');
+            const actionBtns = document.getElementById('student-notice-action-buttons');
+
+            if (studentNoteState === 'none') {
+                box.classList.add('hidden');
+                return;
+            }
+            box.classList.remove('hidden');
+            textEl.innerText = `"${activeNoteText}"`;
+
+            if (studentNoteState === 'draft') {
+                badge.className = "text-[9px] font-bold px-2.5 py-0.5 rounded-full bg-amber-200 text-amber-900";
+                badge.innerText = "ฉบับร่าง";
+                actionBtns.classList.remove('hidden');
+            } else if (studentNoteState === 'pending') {
+                badge.className = "text-[9px] font-bold px-2.5 py-0.5 rounded-full bg-indigo-200 text-indigo-900";
+                badge.innerText = "รอคนขับอนุมัติ";
+                actionBtns.classList.add('hidden');
+            } else if (studentNoteState === 'approved') {
+                badge.className = "text-[9px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-200 text-emerald-900";
+                badge.innerText = "คนขับอนุมัติแล้ว";
+                actionBtns.classList.add('hidden');
+            }
+        }
+
+        function approveNoticeByDriver() {
+            studentNoteState = 'approved';
+            document.getElementById('notice-ping-dot').classList.add('hidden');
+            document.getElementById('driver-notice-card-container').innerHTML = `
+                <div class="p-3 bg-emerald-50 rounded-xl border border-emerald-300 text-emerald-900 font-bold text-xs text-center flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-circle-check text-emerald-600 text-base"></i>
+                    <span>คุณได้อนุมัติคำขอนี้แล้ว (อัปเดตไปยังนักเรียนเรียบร้อย)</span>
+                </div>
+            `;
+            renderStudentNoteCard();
+            showToast("อนุมัติสำเร็จ", "อนุมัติคำขอพิเศษของนักเรียนเรียบร้อยแล้ว");
+        }
+
+        function disapproveNoticeByDriver() {
+            studentNoteState = 'none';
+            document.getElementById('notice-ping-dot').classList.add('hidden');
+            document.getElementById('driver-notice-card-container').innerHTML = `
+                <div class="p-3 bg-rose-50 rounded-xl border border-rose-300 text-rose-900 font-bold text-xs text-center">
+                    ❌ ปฏิเสธคำขอเรียบร้อยแล้ว
+                </div>
+            `;
+            renderStudentNoteCard();
+            showToast("ปฏิเสธคำขอ", "แจ้งปฏิเสธคำขอพิเศษเรียบร้อย");
+        }
+
+        // Panels & Bottom Sheets
+        function togglePanel(panelId) {
+            if (!isDrivingActive && panelId !== 'panel-payment-schedule') {
+                showToast("แจ้งเตือน", "กรุณากดปุ่ม 'กดเพื่อเริ่มวิ่งรถ' ก่อนเปิดดูข้อมูลครับ", "fa-solid fa-triangle-exclamation", "bg-amber-500/20 text-amber-400");
+                return;
+            }
+            const target = document.getElementById(panelId);
+            ['panel-students', 'panel-school', 'panel-notice', 'panel-payment-schedule'].forEach(id => {
+                if (id !== panelId) document.getElementById(id).classList.remove('open');
+            });
+            target.classList.toggle('open');
+        }
+
+        function toggleBottomSheet(role) {
+            const sheet = document.getElementById(`bottom-sheet-${role}`);
+            sheetState[role] = !sheetState[role];
+            if (sheetState[role]) {
+                sheet.classList.add('sheet-minimized');
+                document.getElementById(`expand-text-${role}`).innerText = "ย่อแผนที่";
+            } else {
+                sheet.classList.remove('sheet-minimized');
+                document.getElementById(`expand-text-${role}`).innerText = "ขยายแผนที่";
+            }
+            // Invalidate Leaflet size
+            setTimeout(() => {
+                if (mapDriver) mapDriver.invalidateSize();
+                if (mapStudent) mapStudent.invalidateSize();
+                if (mapParent) mapParent.invalidateSize();
+            }, 350);
+        }
+
+        // Simulated Rollovers
+        function simulateNextDayRollover() {
+            isMorningGoTomorrow = true; 
+            isEveningGo = true;
+            studentNoteState = 'none';
+            activeNoteText = "";
+            driverStudentsList.forEach(s => s.boarded = false);
+            updateStudentScheduleUI();
+            initDriverStudentList();
+            renderStudentNoteCard();
+            showToast("จำลองวันใหม่", "ระบบ Reset สถานะการขึ้นรถและคำขอเป็นวันใหม่เรียบร้อย");
+        }
+
+        function simulateNoonReset() {
+            driverStudentsList.forEach(s => s.boarded = false);
+            initDriverStudentList();
+            showToast("รีเซ็ตเที่ยงวัน", "ระบบเปลี่ยนเป็นรอบเย็น และรีเซ็ตสถานะขึ้นรถเรียบร้อย");
+        }
+
+        // Van QR Registration & Scan
+        function openVanQRModal() {
+            const qrBox = document.getElementById('van-actual-qrcode-box');
+            qrBox.innerHTML = "";
+            new QRCode(qrBox, {
+                text: "SCHOOL_VAN_REGISTER|V-98765|LUNG_SAK",
+                width: 130,
+                height: 130,
+                colorDark : "#1e1b4b",
+                colorLight : "#ffffff",
+                correctLevel : QRCode.CorrectLevel.M
+            });
+            document.getElementById('van-qr-modal').classList.remove('hidden');
+            document.getElementById('van-qr-modal').classList.add('flex');
+        }
+        function closeVanQRModal() {
+            document.getElementById('van-qr-modal').classList.remove('flex');
+            document.getElementById('van-qr-modal').classList.add('hidden');
+        }
+        function simulateStudentScanRequest() {
+            closeVanQRModal();
+            document.getElementById('driver-accept-modal').classList.remove('hidden');
+            document.getElementById('driver-accept-modal').classList.add('flex');
+        }
+        function closeAcceptModal() {
+            document.getElementById('driver-accept-modal').classList.remove('flex');
+            document.getElementById('driver-accept-modal').classList.add('hidden');
+        }
+        function confirmAcceptStudent() {
+            closeAcceptModal();
+            driverStudentsList.push({ id: 5, name: "ด.ช. นพดล เรียนดี", nickname: "น้องนพ", school: "โรงเรียนนานาชาติร่วมฤดี", address: "หมู่บ้านพฤกษา ซอย 12", fare: 2800, isMorningGo: true, isEveningGo: true, boarded: true, statusNote: "สแกน QR เข้าระบบ", lat: 13.7630, lng: 100.5350 });
+            initDriverStudentList();
+            showToast("รับสมาชิกใหม่", "ยินดีต้อนรับ ด.ช. นพดล ขึ้นรถตู้ประจำคัน");
+        }
+
+        // Fare Settings
+        function openFareSettingsModal() {
+            document.getElementById('input-driver-account-name').value = driverAccountName;
+            document.getElementById('input-driver-promptpay').value = driverPromptPayNumber;
+
+            const fareContainer = document.getElementById('fare-student-settings-container');
+            fareContainer.innerHTML = driverStudentsList.map(s => `
+                <div class="p-3 bg-slate-50 border border-slate-200 rounded-2xl space-y-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="font-bold text-slate-900 text-xs">${s.id}. ${s.name} (${s.nickname})</span>
+                        <span class="text-[10px] text-slate-500">${s.school}</span>
+                    </div>
+                    <div>
+                        <input type="number" id="input-fare-student-${s.id}" value="${s.fare}" class="w-full p-2 rounded-xl border border-slate-300 font-bold text-purple-900 text-right bg-white text-xs">
+                    </div>
+                </div>
+            `).join('');
+
+            document.getElementById('fare-settings-modal').classList.remove('hidden');
+            document.getElementById('fare-settings-modal').classList.add('flex');
+        }
+
+        function closeFareSettingsModal() {
+            document.getElementById('fare-settings-modal').classList.remove('flex');
+            document.getElementById('fare-settings-modal').classList.add('hidden');
+        }
+
+        function saveCustomFareRates() {
+            driverAccountName = document.getElementById('input-driver-account-name').value;
+            driverPromptPayNumber = document.getElementById('input-driver-promptpay').value;
+
+            driverStudentsList.forEach(s => {
+                const fareInput = document.getElementById(`input-fare-student-${s.id}`);
+                if (fareInput) s.fare = Number(fareInput.value);
+            });
+
+            currentSomchaiFare = driverStudentsList[0].fare;
+            document.getElementById('fare-text-somchai').innerText = `฿${driverStudentsList[0].fare.toLocaleString()} / เดือน`;
+            document.getElementById('parent-fee-display').innerText = `฿${driverStudentsList[0].fare.toLocaleString()}`;
+
+            closeFareSettingsModal();
+            showToast("บันทึกการตั้งค่า", "บันทึกราคาและข้อมูลบัญชีรับเงินเรียบร้อยแล้ว");
+        }
+
+        // School Route Reordering
+        function openSchoolRouteSettingsModal() {
+            const modal = document.getElementById('school-route-settings-modal');
+            const list = document.getElementById('school-route-order-list');
+            list.innerHTML = schoolRouteOrder.map((school, index) => `
+                <div class="p-2.5 bg-slate-50 rounded-xl border flex justify-between items-center">
+                    <span class="font-bold text-slate-800 text-xs">${index + 1}. ${school}</span>
+                    <div class="flex gap-1">
+                        <button onclick="moveSchoolOrder(${index}, -1)" class="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 rounded-lg text-xs">⬆️</button>
+                        <button onclick="moveSchoolOrder(${index}, 1)" class="px-2.5 py-1 bg-slate-200 hover:bg-slate-300 rounded-lg text-xs">⬇️</button>
+                    </div>
+                </div>
+            `).join('');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        function closeSchoolRouteSettingsModal() {
+            document.getElementById('school-route-settings-modal').classList.remove('flex');
+            document.getElementById('school-route-settings-modal').classList.add('hidden');
+        }
+        function moveSchoolOrder(index, direction) {
+            const newIndex = index + direction;
+            if (newIndex >= 0 && newIndex < schoolRouteOrder.length) {
+                const temp = schoolRouteOrder[index];
+                schoolRouteOrder[index] = schoolRouteOrder[newIndex];
+                schoolRouteOrder[newIndex] = temp;
+                openSchoolRouteSettingsModal();
+            }
+        }
+        function saveSchoolRouteOrder() {
+            closeSchoolRouteSettingsModal();
+            initDriverStudentList();
+            showToast("บันทึกลำดับ", "บันทึกลำดับการแวะส่งโรงเรียนเรียบร้อยแล้ว");
+        }
+
+        // Profile Modal
+        function openProfileEditModal(role) {
+            activeEditRole = role;
+            const modal = document.getElementById('profile-edit-modal');
+            const title = document.getElementById('profile-modal-title');
+            const fieldsBox = document.getElementById('profile-form-fields');
+            const badge = document.getElementById('quota-display-badge');
+
+            badge.innerText = `${editQuota[role]} / 3 ครั้ง`;
+
+            if (role === 'driver') {
+                title.innerHTML = `<i class="fa-solid fa-user-gear text-amber-500"></i> แก้ไขข้อมูลคนขับ`;
+                fieldsBox.innerHTML = `
+                    <div>
+                        <label class="font-bold text-slate-700 block mb-1">ชื่อ-นามสกุล:</label>
+                        <input type="text" id="edit-field-1" value="${profileData.driver.name}" class="w-full p-2.5 rounded-xl border border-slate-300 font-semibold text-xs">
+                    </div>
+                    <div>
+                        <label class="font-bold text-slate-700 block mb-1">เบอร์โทรศัพท์:</label>
+                        <input type="text" id="edit-field-2" value="${profileData.driver.phone}" class="w-full p-2.5 rounded-xl border border-slate-300 font-semibold text-xs">
+                    </div>
+                `;
+            } else if (role === 'student') {
+                title.innerHTML = `<i class="fa-solid fa-user-gear text-blue-600"></i> แก้ไขข้อมูลนักเรียน`;
+                fieldsBox.innerHTML = `
+                    <div>
+                        <label class="font-bold text-slate-700 block mb-1">ชื่อนักเรียน:</label>
+                        <input type="text" id="edit-field-1" value="${profileData.student.name}" class="w-full p-2.5 rounded-xl border border-slate-300 font-semibold text-xs">
+                    </div>
+                    <div>
+                        <label class="font-bold text-slate-700 block mb-1">โรงเรียน:</label>
+                        <input type="text" id="edit-field-2" value="${profileData.student.school}" class="w-full p-2.5 rounded-xl border border-slate-300 font-semibold text-xs">
+                    </div>
+                `;
+            } else {
+                title.innerHTML = `<i class="fa-solid fa-user-gear text-purple-600"></i> แก้ไขข้อมูลผู้ปกครอง`;
+                fieldsBox.innerHTML = `
+                    <div>
+                        <label class="font-bold text-slate-700 block mb-1">ชื่อผู้ปกครอง:</label>
+                        <input type="text" id="edit-field-1" value="${profileData.parent.name}" class="w-full p-2.5 rounded-xl border border-slate-300 font-semibold text-xs">
+                    </div>
+                `;
+            }
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeProfileEditModal() {
+            document.getElementById('profile-edit-modal').classList.remove('flex');
+            document.getElementById('profile-edit-modal').classList.add('hidden');
+        }
+
+        function saveProfileChanges() {
+            const val1 = document.getElementById('edit-field-1')?.value;
+            if (activeEditRole === 'driver') {
+                profileData.driver.name = val1;
+                document.getElementById('driver-disp-name').innerText = val1;
+            } else if (activeEditRole === 'student') {
+                profileData.student.name = val1;
+                document.getElementById('student-disp-name').innerText = val1;
+            } else if (activeEditRole === 'parent') {
+                profileData.parent.name = val1;
+                document.getElementById('parent-disp-name').innerText = val1;
+            }
+
+            editQuota[activeEditRole] = Math.max(0, editQuota[activeEditRole] - 1);
+            closeProfileEditModal();
+            showToast("บันทึกสำเร็จ", "อัปเดตข้อมูลโปรไฟล์เรียบร้อยแล้ว");
+        }
+
+        function previewProfileImage(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const img = document.getElementById('modal-avatar-img');
+                img.src = e.target.result;
+                img.classList.remove('hidden');
+                document.getElementById('modal-avatar-text').classList.add('hidden');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function viewVanPhotoModal() {
+            document.getElementById('view-van-photo-modal').classList.remove('hidden');
+            document.getElementById('view-van-photo-modal').classList.add('flex');
+        }
+        function closeViewVanPhotoModal() {
+            document.getElementById('view-van-photo-modal').classList.remove('flex');
+            document.getElementById('view-van-photo-modal').classList.add('hidden');
+        }
+
+        // Chat & Call System
+        function openChatSelectionModal(targetType) {
+            const modal = document.getElementById('chat-selection-modal');
+            const title = document.getElementById('chat-select-title');
+            const list = document.getElementById('chat-selection-list');
+
+            if (targetType === 'student') {
+                title.innerHTML = `<i class="fa-solid fa-user-graduate text-indigo-600"></i> แชทกับนักเรียน`;
+                list.innerHTML = `
+                    <div onclick="closeChatSelectionModal(); openChatScreen('ด.ช. สมชาย ใจดี (น้องชาย)', 'นักเรียน')" class="p-3 bg-slate-50 hover:bg-indigo-50 rounded-xl border flex justify-between items-center cursor-pointer transition">
+                        <p class="font-bold text-slate-800 text-xs">ด.ช. สมชาย ใจดี (น้องชาย)</p>
+                        <i class="fa-solid fa-chevron-right text-xs text-slate-400"></i>
+                    </div>
+                `;
+            } else {
+                title.innerHTML = `<i class="fa-solid fa-user-group text-purple-600"></i> แชทกับผู้ปกครอง`;
+                list.innerHTML = `
+                    <div onclick="closeChatSelectionModal(); openChatScreen('คุณแม่นิด (ผู้ปกครอง)', 'ผู้ปกครอง')" class="p-3 bg-slate-50 hover:bg-purple-50 rounded-xl border flex justify-between items-center cursor-pointer transition">
+                        <p class="font-bold text-slate-800 text-xs">คุณแม่นิด (ผู้ปกครองของ ด.ช.สมชาย)</p>
+                        <i class="fa-solid fa-chevron-right text-xs text-slate-400"></i>
+                    </div>
+                `;
+            }
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+        function closeChatSelectionModal() {
+            document.getElementById('chat-selection-modal').classList.remove('flex');
+            document.getElementById('chat-selection-modal').classList.add('hidden');
+        }
+
+        function openChatScreen(name, subtext) {
+            document.getElementById('chat-target-name').innerText = name;
+            document.getElementById('chat-target-subtext').innerText = subtext;
+            document.getElementById('screen-dashboard').classList.add('hidden');
+            document.getElementById('screen-student-view').classList.add('hidden');
+            document.getElementById('screen-parent-view').classList.add('hidden');
+            document.getElementById('screen-chat').classList.remove('hidden');
+        }
+
+        function closeChatScreen() {
+            document.getElementById('screen-chat').classList.add('hidden');
+            switchRoleView(activeRole);
+        }
+
+        let callSeconds = 0;
+        let callTimerInterval = null;
+
+        function makeDirectCall() {
+            const targetName = document.getElementById('chat-target-name').innerText;
+            document.getElementById('call-screen-name').innerText = targetName;
+            document.getElementById('call-modal').classList.remove('hidden');
+            document.getElementById('call-modal').classList.add('flex');
+            callSeconds = 0;
+            document.getElementById('call-timer').innerText = "00:00";
+            callTimerInterval = setInterval(() => {
+                callSeconds++;
+                const mins = String(Math.floor(callSeconds / 60)).padStart(2, '0');
+                const secs = String(callSeconds % 60).padStart(2, '0');
+                document.getElementById('call-timer').innerText = `${mins}:${secs}`;
+            }, 1000);
+        }
+
+        function endDirectCall() {
+            if (callTimerInterval) clearInterval(callTimerInterval);
+            document.getElementById('call-modal').classList.remove('flex');
+            document.getElementById('call-modal').classList.add('hidden');
+            showToast("วางสายแล้ว", "สิ้นสุดการสนทนาเรียบร้อย");
+        }
+
+        function sendChatMessage() {
+            const input = document.getElementById('chat-input-field');
+            if (!input.value.trim()) return;
+            const box = document.getElementById('chat-messages-box');
+            const div = document.createElement('div');
+            div.className = "flex justify-end";
+            div.innerHTML = `<div class="bg-indigo-600 text-white p-2.5 rounded-2xl rounded-tr-none max-w-[80%] text-xs shadow-sm">${input.value}</div>`;
+            box.appendChild(div);
+
+            const userText = input.value;
+            input.value = "";
+            box.scrollTop = box.scrollHeight;
+
+            // Automated Simulated Response
+            setTimeout(() => {
+                const replyDiv = document.createElement('div');
+                replyDiv.className = "flex justify-start";
+                replyDiv.innerHTML = `<div class="bg-white border border-slate-200 text-slate-800 p-2.5 rounded-2xl rounded-tl-none max-w-[80%] text-xs shadow-sm">รับทราบครับ กำลังดำเนินการให้ทันที 👍</div>`;
+                box.appendChild(replyDiv);
+                box.scrollTop = box.scrollHeight;
+            }, 1200);
+        }
+
+        function simulateAttachFile() {
+            showToast("แนบไฟล์", "จำลองแนบสลิปโอนเงิน หรือรูปถ่ายจุดรอรับเรียบร้อย", "fa-solid fa-paperclip", "bg-indigo-500/20 text-indigo-400");
+        }
+
+        function sendPaymentNoticeToParent(parentName, studentName) {
+            showToast("ส่งบิลแจ้งเตือน", `ส่งบิลแจ้งเตือนค่ารถไปยัง ${parentName} เรียบร้อยแล้ว`);
+        }
+
+        // Role View Switcher
+        function switchRoleView(role) {
+            activeRole = role;
+            document.getElementById('screen-dashboard').classList.add('hidden');
+            document.getElementById('screen-student-view').classList.add('hidden');
+            document.getElementById('screen-parent-view').classList.add('hidden');
+
+            ['driver', 'student', 'parent'].forEach(r => {
+                document.getElementById(`tab-view-${r}`).className = "px-2.5 py-1 rounded-lg font-bold hover:bg-slate-700/50 text-slate-300 transition-all duration-200 text-[11px]";
+            });
+
+            if (role === 'driver') {
+                document.getElementById('screen-dashboard').classList.remove('hidden');
+                document.getElementById('tab-view-driver').className = "px-2.5 py-1 rounded-lg font-bold bg-amber-400 text-slate-950 shadow transition-all duration-200 text-[11px]";
+                if (mapDriver) setTimeout(() => mapDriver.invalidateSize(), 150);
+            } else if (role === 'student') {
+                document.getElementById('screen-student-view').classList.remove('hidden');
+                document.getElementById('tab-view-student').className = "px-2.5 py-1 rounded-lg font-bold bg-blue-500 text-white shadow transition-all duration-200 text-[11px]";
+                if (mapStudent) setTimeout(() => mapStudent.invalidateSize(), 150);
+            } else if (role === 'parent') {
+                document.getElementById('screen-parent-view').classList.remove('hidden');
+                document.getElementById('tab-view-parent').className = "px-2.5 py-1 rounded-lg font-bold bg-purple-600 text-white shadow transition-all duration-200 text-[11px]";
+                if (mapParent) setTimeout(() => mapParent.invalidateSize(), 150);
+            }
+        }
+
+        // Window Load
+        window.onload = function() {
+            initLeafletMaps();
+            initDriverStudentList();
+            renderParentTripStatusUI();
+            updateStudentScheduleUI();
+        };
+    </script>
+</body>
+</html>
